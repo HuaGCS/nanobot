@@ -60,7 +60,7 @@ class WebSearchTool(Tool):
 
     def __init__(
         self,
-        provider: str = "brave",
+        provider: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         max_results: int = 5,
@@ -87,7 +87,11 @@ class WebSearchTool(Tool):
     @property
     def base_url(self) -> str:
         """Resolve SearXNG base URL at call time so env/config changes are picked up."""
-        return (self._init_base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
+        return (
+            self._init_base_url
+            or os.environ.get("WEB_SEARCH_BASE_URL", "")
+            or os.environ.get("SEARXNG_BASE_URL", "")
+        ).strip()
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         provider = self.provider
@@ -134,7 +138,7 @@ class WebSearchTool(Tool):
         if not self.base_url:
             return (
                 "Error: SearXNG base URL not configured. Set tools.web.search.baseUrl "
-                'in ~/.nanobot/config.json (or export SEARXNG_BASE_URL), e.g. "http://localhost:8080".'
+                'in ~/.nanobot/config.json (or export WEB_SEARCH_BASE_URL), e.g. "http://localhost:8080".'
             )
 
         is_valid, error_msg = _validate_url(self.base_url)
