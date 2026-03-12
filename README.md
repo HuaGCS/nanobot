@@ -169,7 +169,7 @@ nanobot channels login
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) or a self-hosted SearXNG instance (optional, for web search)
 
 **1. Initialize**
 
@@ -211,6 +211,42 @@ nanobot agent
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
+
+### Optional: Web Search
+
+`web_search` supports both Brave Search and SearXNG.
+
+**Brave Search**
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "brave",
+        "apiKey": "your-brave-api-key"
+      }
+    }
+  }
+}
+```
+
+**SearXNG**
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "searxng",
+        "baseUrl": "http://localhost:8080"
+      }
+    }
+  }
+}
+```
+
+`baseUrl` can point either to the SearXNG root (for example `http://localhost:8080`) or directly to `/search`.
 
 ## 💬 Chat Apps
 

@@ -306,6 +306,20 @@ def test_agent_warns_about_deprecated_memory_window(mock_agent_runtime):
     assert "contextWindowTokens" in result.stdout
 
 
+def test_agent_passes_web_search_config_to_agent_loop(mock_agent_runtime) -> None:
+    mock_agent_runtime["config"].tools.web.search.provider = "searxng"
+    mock_agent_runtime["config"].tools.web.search.base_url = "http://localhost:8080"
+    mock_agent_runtime["config"].tools.web.search.max_results = 7
+
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    kwargs = mock_agent_runtime["agent_loop_cls"].call_args.kwargs
+    assert kwargs["web_search_provider"] == "searxng"
+    assert kwargs["web_search_base_url"] == "http://localhost:8080"
+    assert kwargs["web_search_max_results"] == 7
+
+
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)

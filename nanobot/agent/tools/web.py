@@ -45,7 +45,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using Brave Search or SearXNG."""
 
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -58,8 +58,17 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
 
-    def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None):
+    def __init__(
+        self,
+        provider: str = "brave",
+        api_key: str | None = None,
+        base_url: str | None = None,
+        max_results: int = 5,
+        proxy: str | None = None,
+    ):
+        self._init_provider = provider
         self._init_api_key = api_key
+        self._init_base_url = base_url
         self.max_results = max_results
         self.proxy = proxy
 
@@ -68,7 +77,32 @@ class WebSearchTool(Tool):
         """Resolve API key at call time so env/config changes are picked up."""
         return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
 
+    @property
+    def provider(self) -> str:
+        """Resolve search provider at call time so env/config changes are picked up."""
+        return (
+            self._init_provider or os.environ.get("WEB_SEARCH_PROVIDER", "brave")
+        ).strip().lower()
+
+    @property
+    def base_url(self) -> str:
+        """Resolve SearXNG base URL at call time so env/config changes are picked up."""
+        return (self._init_base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
+
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        provider = self.provider
+        n = min(max(count or self.max_results, 1), 10)
+
+        if provider == "brave":
+            return await self._search_brave(query=query, count=n)
+        if provider == "searxng":
+            return await self._search_searxng(query=query, count=n)
+        return (
+            f"Error: Unsupported web search provider '{provider}'. "
+            "Supported values: brave, searxng."
+        )
+
+    async def _search_brave(self, query: str, count: int) -> str:
         if not self.api_key:
             return (
                 "Error: Brave Search API key not configured. Set it in "
@@ -77,33 +111,80 @@ class WebSearchTool(Tool):
             )
 
         try:
-            n = min(max(count or self.max_results, 1), 10)
             logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
+                    params={"q": query, "count": count},
                     headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
+                    timeout=10.0,
                 )
                 r.raise_for_status()
 
-            results = r.json().get("web", {}).get("results", [])[:n]
-            if not results:
-                return f"No results for: {query}"
-
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results, 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
+            results = r.json().get("web", {}).get("results", [])[:count]
+            return self._format_results(query, results, snippet_keys=("description",))
         except httpx.ProxyError as e:
             logger.error("WebSearch proxy error: {}", e)
             return f"Proxy error: {e}"
         except Exception as e:
             logger.error("WebSearch error: {}", e)
             return f"Error: {e}"
+
+    async def _search_searxng(self, query: str, count: int) -> str:
+        if not self.base_url:
+            return (
+                "Error: SearXNG base URL not configured. Set tools.web.search.baseUrl "
+                'in ~/.nanobot/config.json (or export SEARXNG_BASE_URL), e.g. "http://localhost:8080".'
+            )
+
+        is_valid, error_msg = _validate_url(self.base_url)
+        if not is_valid:
+            return f"Error: Invalid SearXNG base URL: {error_msg}"
+
+        try:
+            logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.get(
+                    self._build_searxng_search_url(),
+                    params={"q": query, "format": "json"},
+                    headers={"Accept": "application/json"},
+                    timeout=10.0,
+                )
+                r.raise_for_status()
+
+            results = r.json().get("results", [])[:count]
+            return self._format_results(
+                query,
+                results,
+                snippet_keys=("content", "snippet", "description"),
+            )
+        except httpx.ProxyError as e:
+            logger.error("WebSearch proxy error: {}", e)
+            return f"Proxy error: {e}"
+        except Exception as e:
+            logger.error("WebSearch error: {}", e)
+            return f"Error: {e}"
+
+    def _build_searxng_search_url(self) -> str:
+        base_url = self.base_url.rstrip("/")
+        return base_url if base_url.endswith("/search") else f"{base_url}/search"
+
+    @staticmethod
+    def _format_results(
+        query: str,
+        results: list[dict[str, Any]],
+        snippet_keys: tuple[str, ...],
+    ) -> str:
+        if not results:
+            return f"No results for: {query}"
+
+        lines = [f"Results for: {query}\n"]
+        for i, item in enumerate(results, 1):
+            lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+            snippet = next((item.get(key) for key in snippet_keys if item.get(key)), None)
+            if snippet:
+                lines.append(f"   {snippet}")
+        return "\n".join(lines)
 
 
 class WebFetchTool(Tool):
