@@ -14,6 +14,7 @@ from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.agent.i18n import help_lines, normalize_language_code, telegram_command_descriptions, text
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import TelegramConfig
@@ -158,14 +159,7 @@ class TelegramChannel(BaseChannel):
     name = "telegram"
     display_name = "Telegram"
 
-    # Commands registered with Telegram's command menu
-    BOT_COMMANDS = [
-        BotCommand("start", "Start the bot"),
-        BotCommand("new", "Start a new conversation"),
-        BotCommand("stop", "Stop the current task"),
-        BotCommand("help", "Show available commands"),
-        BotCommand("restart", "Restart the bot"),
-    ]
+    COMMAND_NAMES = ("start", "new", "lang", "persona", "stop", "help", "restart")
 
     def __init__(self, config: TelegramConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -198,6 +192,17 @@ class TelegramChannel(BaseChannel):
 
         return sid in allow_list or username in allow_list
 
+    @classmethod
+    def _build_bot_commands(cls, language: str) -> list[BotCommand]:
+        """Build localized command menu entries."""
+        labels = telegram_command_descriptions(language)
+        return [BotCommand(name, labels[name]) for name in cls.COMMAND_NAMES]
+
+    @staticmethod
+    def _preferred_language(user) -> str:
+        """Map Telegram's user language code to a supported locale."""
+        return normalize_language_code(getattr(user, "language_code", None)) or "en"
+
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
@@ -221,6 +226,8 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("lang", self._forward_command))
+        self._app.add_handler(CommandHandler("persona", self._forward_command))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
@@ -247,7 +254,8 @@ class TelegramChannel(BaseChannel):
         logger.info("Telegram bot @{} connected", bot_info.username)
 
         try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
+            await self._app.bot.set_my_commands(self._build_bot_commands("en"))
+            await self._app.bot.set_my_commands(self._build_bot_commands("zh"), language_code="zh-hans")
             logger.debug("Telegram bot commands registered")
         except Exception as e:
             logger.warning("Failed to register bot commands: {}", e)
@@ -420,22 +428,15 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
-        await update.message.reply_text(
-            f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
-            "Send me a message and I'll respond!\n"
-            "Type /help to see available commands."
-        )
+        language = self._preferred_language(user)
+        await update.message.reply_text(text(language, "start_greeting", name=user.first_name))
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command, bypassing ACL so all users can access it."""
-        if not update.message:
+        if not update.message or not update.effective_user:
             return
-        await update.message.reply_text(
-            "🐈 nanobot commands:\n"
-            "/new — Start a new conversation\n"
-            "/stop — Stop the current task\n"
-            "/help — Show available commands"
-        )
+        language = self._preferred_language(update.effective_user)
+        await update.message.reply_text("\n".join(help_lines(language)))
 
     @staticmethod
     def _sender_id(user) -> str:

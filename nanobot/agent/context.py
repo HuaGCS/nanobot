@@ -8,7 +8,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.i18n import language_label, resolve_language
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.personas import (
+    DEFAULT_PERSONA,
+    list_personas,
+    persona_workspace,
+    personas_root,
+    resolve_persona_name,
+)
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
@@ -21,18 +29,36 @@ class ContextBuilder:
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity()]
+    def list_personas(self) -> list[str]:
+        """Return the personas available for this workspace."""
+        return list_personas(self.workspace)
 
-        bootstrap = self._load_bootstrap_files()
+    def find_persona(self, persona: str | None) -> str | None:
+        """Resolve a persona name without applying a default fallback."""
+        return resolve_persona_name(self.workspace, persona)
+
+    def resolve_persona(self, persona: str | None) -> str:
+        """Return a canonical persona name, defaulting to the built-in persona."""
+        return self.find_persona(persona) or DEFAULT_PERSONA
+
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        persona: str | None = None,
+        language: str | None = None,
+    ) -> str:
+        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        active_persona = self.resolve_persona(persona)
+        active_language = resolve_language(language)
+        parts = [self._get_identity(active_persona, active_language)]
+
+        bootstrap = self._load_bootstrap_files(active_persona)
         if bootstrap:
             parts.append(bootstrap)
 
-        memory = self.memory.get_memory_context()
+        memory = self._memory_store(active_persona).get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
@@ -53,9 +79,12 @@ Skills with available="false" need dependencies installed first - you can try in
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self) -> str:
+    def _get_identity(self, persona: str, language: str) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
+        active_workspace = persona_workspace(self.workspace, persona)
+        persona_path = str(active_workspace.expanduser().resolve())
+        language_name = language_label(language, language)
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
 
@@ -81,9 +110,17 @@ You are nanobot, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Long-term memory: {persona_path}/memory/MEMORY.md (write important facts here)
+- History log: {persona_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
+
+## Persona
+Current persona: {persona}
+- Persona workspace: {persona_path}
+
+## Language
+Preferred response language: {language_name}
+- Use this language for assistant replies and command/status text unless the user explicitly asks for another language.
 
 {platform_policy}
 
@@ -106,12 +143,21 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
-    def _load_bootstrap_files(self) -> str:
+    def _memory_store(self, persona: str) -> MemoryStore:
+        """Return the memory store for the active persona."""
+        return MemoryStore(persona_workspace(self.workspace, persona))
+
+    def _load_bootstrap_files(self, persona: str) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
+        persona_dir = None if persona == DEFAULT_PERSONA else personas_root(self.workspace) / persona
 
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
+            if persona_dir:
+                persona_file = persona_dir / filename
+                if persona_file.exists():
+                    file_path = persona_file
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
@@ -126,6 +172,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        persona: str | None = None,
+        language: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -139,7 +187,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, persona=persona, language=language)},
             *history,
             {"role": "user", "content": merged},
         ]

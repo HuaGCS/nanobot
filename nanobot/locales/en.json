@@ -1,0 +1,47 @@
+{
+  "texts": {
+    "current_marker": "current",
+    "new_session_started": "New session started.",
+    "memory_archival_failed_session": "Memory archival failed, session not cleared. Please try again.",
+    "memory_archival_failed_persona": "Memory archival failed, persona not switched. Please try again.",
+    "help_header": "🐈 nanobot commands:",
+    "cmd_new": "/new — Start a new conversation",
+    "cmd_lang_current": "/lang current — Show the active language",
+    "cmd_lang_list": "/lang list — List available languages",
+    "cmd_lang_set": "/lang set <en|zh> — Switch command language",
+    "cmd_persona_current": "/persona current — Show the active persona",
+    "cmd_persona_list": "/persona list — List available personas",
+    "cmd_persona_set": "/persona set <name> — Switch persona and start a new session",
+    "cmd_stop": "/stop — Stop the current task",
+    "cmd_restart": "/restart — Restart the bot",
+    "cmd_help": "/help — Show available commands",
+    "current_persona": "Current persona: {persona}",
+    "available_personas": "Available personas:\n{items}",
+    "unknown_persona": "Unknown persona: {name}\nAvailable personas: {personas}\nCreate one under {path} and add SOUL.md or USER.md.",
+    "persona_already_active": "Persona {persona} is already active.",
+    "switched_persona": "Switched persona to {persona}. New session started.",
+    "current_language": "Current language: {language_name}",
+    "available_languages": "Available languages:\n{items}",
+    "unknown_language": "Unknown language: {name}\nAvailable languages: {languages}",
+    "language_already_active": "Language {language_name} is already active.",
+    "switched_language": "Language switched to {language_name}.",
+    "stopped_tasks": "Stopped {count} task(s).",
+    "no_active_task": "No active task to stop.",
+    "restarting": "Restarting...",
+    "generic_error": "Sorry, I encountered an error.",
+    "start_greeting": "Hi {name}. I'm nanobot.\n\nSend me a message and I'll respond.\nType /help to see available commands."
+  },
+  "language_labels": {
+    "en": "English",
+    "zh": "Chinese"
+  },
+  "telegram_commands": {
+    "start": "Start the bot",
+    "new": "Start a new conversation",
+    "lang": "Switch language",
+    "persona": "Show or switch personas",
+    "stop": "Stop the current task",
+    "help": "Show command help",
+    "restart": "Restart the bot"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "texts": {
+    "current_marker": "当前",
+    "new_session_started": "已开始新的会话。",
+    "memory_archival_failed_session": "记忆归档失败，会话未清空，请稍后重试。",
+    "memory_archival_failed_persona": "记忆归档失败，人格未切换，请稍后重试。",
+    "help_header": "🐈 nanobot 命令：",
+    "cmd_new": "/new — 开启新的对话",
+    "cmd_lang_current": "/lang current — 查看当前语言",
+    "cmd_lang_list": "/lang list — 查看可用语言",
+    "cmd_lang_set": "/lang set <en|zh> — 切换命令语言",
+    "cmd_persona_current": "/persona current — 查看当前人格",
+    "cmd_persona_list": "/persona list — 查看可用人格",
+    "cmd_persona_set": "/persona set <name> — 切换人格并开始新会话",
+    "cmd_stop": "/stop — 停止当前任务",
+    "cmd_restart": "/restart — 重启机器人",
+    "cmd_help": "/help — 查看命令帮助",
+    "current_persona": "当前人格：{persona}",
+    "available_personas": "可用人格：\n{items}",
+    "unknown_persona": "未知人格：{name}\n可用人格：{personas}\n请在 {path} 下创建人格目录，并添加 SOUL.md 或 USER.md。",
+    "persona_already_active": "人格 {persona} 已经处于启用状态。",
+    "switched_persona": "已切换到人格 {persona}，并开始新的会话。",
+    "current_language": "当前语言：{language_name}",
+    "available_languages": "可用语言：\n{items}",
+    "unknown_language": "未知语言：{name}\n可用语言：{languages}",
+    "language_already_active": "语言 {language_name} 已经处于启用状态。",
+    "switched_language": "已切换语言为 {language_name}。",
+    "stopped_tasks": "已停止 {count} 个任务。",
+    "no_active_task": "当前没有可停止的任务。",
+    "restarting": "正在重启……",
+    "generic_error": "抱歉，处理时遇到了错误。",
+    "start_greeting": "你好，{name}！我是 nanobot。\n\n给我发消息我就会回复你。\n输入 /help 查看可用命令。"
+  },
+  "language_labels": {
+    "en": "英语",
+    "zh": "中文"
+  },
+  "telegram_commands": {
+    "start": "启动机器人",
+    "new": "开启新对话",
+    "lang": "切换语言",
+    "persona": "查看或切换人格",
+    "stop": "停止当前任务",
+    "help": "查看命令帮助",
+    "restart": "重启机器人"
+  }
+}

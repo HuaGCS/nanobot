@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from nanobot.agent.i18n import DEFAULT_LANGUAGE, resolve_language
+from nanobot.agent.personas import DEFAULT_PERSONA, persona_workspace, resolve_persona_name
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:
@@ -69,6 +71,7 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
     """Detect provider errors caused by forced tool_choice being unsupported."""
     text = (content or "").lower()
     return any(m in text for m in _TOOL_CHOICE_ERROR_MARKERS)
+
 
 
 class MemoryStore:
@@ -195,7 +198,7 @@ class MemoryConsolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
     ):
-        self.store = MemoryStore(workspace)
+        self.workspace = workspace
         self.provider = provider
         self.model = model
         self.sessions = sessions
@@ -204,13 +207,27 @@ class MemoryConsolidator:
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
+    def _get_persona(self, session: Session) -> str:
+        """Resolve the active persona for a session."""
+        return resolve_persona_name(self.workspace, session.metadata.get("persona")) or DEFAULT_PERSONA
+
+    def _get_language(self, session: Session) -> str:
+        """Resolve the active language for a session."""
+        metadata = getattr(session, "metadata", {})
+        raw = metadata.get("language") if isinstance(metadata, dict) else DEFAULT_LANGUAGE
+        return resolve_language(raw)
+
+    def _get_store(self, session: Session) -> MemoryStore:
+        """Return the memory store associated with the active persona."""
+        return MemoryStore(persona_workspace(self.workspace, self._get_persona(session)))
+
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
 
-    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
+    async def consolidate_messages(self, session: Session, messages: list[dict[str, object]]) -> bool:
         """Archive a selected message chunk into persistent memory."""
-        return await self.store.consolidate(messages, self.provider, self.model)
+        return await self._get_store(session).consolidate(messages, self.provider, self.model)
 
     def pick_consolidation_boundary(
         self,
@@ -243,6 +260,8 @@ class MemoryConsolidator:
             current_message="[token-probe]",
             channel=channel,
             chat_id=chat_id,
+            persona=self._get_persona(session),
+            language=self._get_language(session),
         )
         return estimate_prompt_tokens_chain(
             self.provider,
@@ -258,7 +277,7 @@ class MemoryConsolidator:
             snapshot = session.messages[session.last_consolidated:]
             if not snapshot:
                 return True
-            return await self.consolidate_messages(snapshot)
+            return await self.consolidate_messages(session, snapshot)
 
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
         """Loop: archive old messages until prompt fits within half the context window."""
@@ -308,7 +327,7 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.consolidate_messages(chunk):
+                if not await self.consolidate_messages(session, chunk):
                     return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)

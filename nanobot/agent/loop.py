@@ -14,6 +14,15 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.i18n import (
+    DEFAULT_LANGUAGE,
+    help_lines,
+    language_label,
+    list_languages,
+    normalize_language_code,
+    resolve_language,
+    text,
+)
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -118,6 +127,52 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
         )
         self._register_default_tools()
+
+    @staticmethod
+    def _command_name(content: str) -> str:
+        """Return the normalized slash command name."""
+        parts = content.strip().split(None, 1)
+        return parts[0].lower() if parts else ""
+
+    def _get_session_persona(self, session: Session) -> str:
+        """Return the active persona name for a session."""
+        return self.context.resolve_persona(session.metadata.get("persona"))
+
+    def _get_session_language(self, session: Session) -> str:
+        """Return the active language for a session."""
+        metadata = getattr(session, "metadata", {})
+        raw = metadata.get("language") if isinstance(metadata, dict) else DEFAULT_LANGUAGE
+        return resolve_language(raw)
+
+    def _set_session_persona(self, session: Session, persona: str) -> None:
+        """Persist the selected persona for a session."""
+        if persona == "default":
+            session.metadata.pop("persona", None)
+        else:
+            session.metadata["persona"] = persona
+
+    def _set_session_language(self, session: Session, language: str) -> None:
+        """Persist the selected language for a session."""
+        if language == DEFAULT_LANGUAGE:
+            session.metadata.pop("language", None)
+        else:
+            session.metadata["language"] = language
+
+    def _persona_usage(self, language: str) -> str:
+        """Return persona command help text."""
+        return "\n".join([
+            text(language, "cmd_persona_current"),
+            text(language, "cmd_persona_list"),
+            text(language, "cmd_persona_set"),
+        ])
+
+    def _language_usage(self, language: str) -> str:
+        """Return language command help text."""
+        return "\n".join([
+            text(language, "cmd_lang_current"),
+            text(language, "cmd_lang_list"),
+            text(language, "cmd_lang_set"),
+        ])
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -275,7 +330,7 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
 
-            cmd = msg.content.strip().lower()
+            cmd = self._command_name(msg.content)
             if cmd == "/stop":
                 await self._handle_stop(msg)
             elif cmd == "/restart":
@@ -296,15 +351,19 @@ class AgentLoop:
                 pass
         sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
         total = cancelled + sub_cancelled
-        content = f"Stopped {total} task(s)." if total else "No active task to stop."
+        session = self.sessions.get_or_create(msg.session_key)
+        language = self._get_session_language(session)
+        content = text(language, "stopped_tasks", count=total) if total else text(language, "no_active_task")
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
 
     async def _handle_restart(self, msg: InboundMessage) -> None:
         """Restart the process in-place via os.execv."""
+        session = self.sessions.get_or_create(msg.session_key)
+        language = self._get_session_language(session)
         await self.bus.publish_outbound(OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content="Restarting...",
+            channel=msg.channel, chat_id=msg.chat_id, content=text(language, "restarting"),
         ))
 
         async def _do_restart():
@@ -334,8 +393,144 @@ class AgentLoop:
                 logger.exception("Error processing message for session {}", msg.session_key)
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
+                    content=text(self._get_session_language(self.sessions.get_or_create(msg.session_key)), "generic_error"),
                 ))
+
+    async def _handle_language_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        """Handle session-scoped language switching commands."""
+        current = self._get_session_language(session)
+        parts = msg.content.strip().split()
+        if len(parts) == 1 or parts[1].lower() == "current":
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(current, "current_language", language_name=language_label(current, current)),
+            )
+
+        subcommand = parts[1].lower()
+        if subcommand == "list":
+            items = "\n".join(
+                f"- {language_label(code, current)}"
+                + (f" ({text(current, 'current_marker')})" if code == current else "")
+                for code in list_languages()
+            )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(current, "available_languages", items=items),
+            )
+
+        if subcommand != "set" or len(parts) < 3:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=self._language_usage(current),
+            )
+
+        target = normalize_language_code(parts[2])
+        if target is None:
+            languages = ", ".join(language_label(code, current) for code in list_languages())
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(current, "unknown_language", name=parts[2], languages=languages),
+            )
+
+        if target == current:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(current, "language_already_active", language_name=language_label(target, current)),
+            )
+
+        self._set_session_language(session, target)
+        self.sessions.save(session)
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=text(target, "switched_language", language_name=language_label(target, target)),
+        )
+
+    async def _handle_persona_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        """Handle session-scoped persona management commands."""
+        language = self._get_session_language(session)
+        parts = msg.content.strip().split()
+        if len(parts) == 1 or parts[1].lower() == "current":
+            current = self._get_session_persona(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(language, "current_persona", persona=current),
+            )
+
+        subcommand = parts[1].lower()
+        if subcommand == "list":
+            current = self._get_session_persona(session)
+            marker = text(language, "current_marker")
+            personas = [
+                f"{name} ({marker})" if name == current else name
+                for name in self.context.list_personas()
+            ]
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(language, "available_personas", items="\n".join(f"- {name}" for name in personas)),
+            )
+
+        if subcommand != "set" or len(parts) < 3:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=self._persona_usage(language),
+            )
+
+        target = self.context.find_persona(parts[2])
+        if target is None:
+            personas = ", ".join(self.context.list_personas())
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(
+                    language,
+                    "unknown_persona",
+                    name=parts[2],
+                    personas=personas,
+                    path=self.workspace / "personas" / parts[2],
+                ),
+            )
+
+        current = self._get_session_persona(session)
+        if target == current:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(language, "persona_already_active", persona=target),
+            )
+
+        try:
+            if not await self.memory_consolidator.archive_unconsolidated(session):
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=text(language, "memory_archival_failed_persona"),
+                )
+        except Exception:
+            logger.exception("/persona archival failed for {}", session.key)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(language, "memory_archival_failed_persona"),
+            )
+
+        session.clear()
+        self._set_session_persona(session, target)
+        self.sessions.save(session)
+        self.sessions.invalidate(session.key)
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=text(language, "switched_persona", persona=target),
+        )
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -365,12 +560,18 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            persona = self._get_session_persona(session)
+            language = self._get_session_language(session)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                channel=channel,
+                chat_id=chat_id,
+                persona=persona,
+                language=language,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -384,40 +585,39 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        persona = self._get_session_persona(session)
+        language = self._get_session_language(session)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
+        cmd = self._command_name(msg.content)
         if cmd == "/new":
             try:
                 if not await self.memory_consolidator.archive_unconsolidated(session):
                     return OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
-                        content="Memory archival failed, session not cleared. Please try again.",
+                        content=text(language, "memory_archival_failed_session"),
                     )
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
+                    content=text(language, "memory_archival_failed_session"),
                 )
 
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+                                  content=text(language, "new_session_started"))
+        if cmd in {"/lang", "/language"}:
+            return await self._handle_language_command(msg, session)
+        if cmd == "/persona":
+            return await self._handle_persona_command(msg, session)
         if cmd == "/help":
-            lines = [
-                "🐈 nanobot commands:",
-                "/new — Start a new conversation",
-                "/stop — Stop the current task",
-                "/restart — Restart the bot",
-                "/help — Show available commands",
-            ]
             return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+                channel=msg.channel, chat_id=msg.chat_id, content="\n".join(help_lines(language)),
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
@@ -431,7 +631,10 @@ class AgentLoop:
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            persona=persona,
+            language=language,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

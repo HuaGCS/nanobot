@@ -71,3 +71,29 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Channel: cli" in user_content
     assert "Chat ID: direct" in user_content
     assert "Return exactly: OK" in user_content
+
+
+def test_persona_prompt_uses_persona_overrides_and_memory(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("root agents", encoding="utf-8")
+    (workspace / "SOUL.md").write_text("root soul", encoding="utf-8")
+    (workspace / "USER.md").write_text("root user", encoding="utf-8")
+    (workspace / "memory").mkdir()
+    (workspace / "memory" / "MEMORY.md").write_text("root memory", encoding="utf-8")
+
+    persona_dir = workspace / "personas" / "coder"
+    persona_dir.mkdir(parents=True)
+    (persona_dir / "SOUL.md").write_text("coder soul", encoding="utf-8")
+    (persona_dir / "USER.md").write_text("coder user", encoding="utf-8")
+    (persona_dir / "memory").mkdir()
+    (persona_dir / "memory" / "MEMORY.md").write_text("coder memory", encoding="utf-8")
+
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt(persona="coder")
+
+    assert "Current persona: coder" in prompt
+    assert "root agents" in prompt
+    assert "coder soul" in prompt
+    assert "coder user" in prompt
+    assert "coder memory" in prompt
+    assert "root memory" not in prompt
