@@ -295,6 +295,62 @@ routed as `channel/name`.
 For `whatsapp`, each instance should point to its own bridge process with its own `bridgeUrl`
 and bridge auth/session directory.
 
+Multi-instance notes:
+
+- Keep each `instances[].name` unique within the same channel.
+- Single-instance config is still supported; switch to `instances` only when you need multiple
+  bots/accounts for the same channel.
+- Replies, sessions, and routing use `channel/name`, for example `telegram/main` or `qq/bot-a`.
+- `matrix` instances automatically use isolated `matrix-store/<instance>` directories.
+- `mochat` instances automatically use isolated runtime cursor directories.
+- `whatsapp` instances require separate bridge processes, typically with different `BRIDGE_PORT`
+  and `AUTH_DIR` values.
+
+Example with two different multi-instance channels:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "instances": [
+        {
+          "name": "main",
+          "token": "BOT_TOKEN_A",
+          "allowFrom": ["YOUR_USER_ID"]
+        },
+        {
+          "name": "backup",
+          "token": "BOT_TOKEN_B",
+          "allowFrom": ["YOUR_USER_ID"]
+        }
+      ]
+    },
+    "matrix": {
+      "enabled": true,
+      "instances": [
+        {
+          "name": "ops",
+          "homeserver": "https://matrix.org",
+          "userId": "@bot-ops:matrix.org",
+          "accessToken": "syt_ops",
+          "deviceId": "OPS01",
+          "allowFrom": ["@your_user:matrix.org"]
+        },
+        {
+          "name": "support",
+          "homeserver": "https://matrix.org",
+          "userId": "@bot-support:matrix.org",
+          "accessToken": "syt_support",
+          "deviceId": "SUPPORT01",
+          "allowFrom": ["@your_user:matrix.org"]
+        }
+      ]
+    }
+  }
+}
+```
+
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
 
