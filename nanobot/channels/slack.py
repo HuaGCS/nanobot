@@ -14,7 +14,7 @@ from slackify_markdown import slackify_markdown
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import SlackConfig
+from nanobot.config.schema import SlackConfig, SlackInstanceConfig
 
 
 class SlackChannel(BaseChannel):
@@ -23,9 +23,9 @@ class SlackChannel(BaseChannel):
     name = "slack"
     display_name = "Slack"
 
-    def __init__(self, config: SlackConfig, bus: MessageBus):
+    def __init__(self, config: SlackConfig | SlackInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: SlackConfig = config
+        self.config: SlackConfig | SlackInstanceConfig = config
         self._web_client: AsyncWebClient | None = None
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None

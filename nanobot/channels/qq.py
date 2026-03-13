@@ -9,7 +9,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import QQConfig
+from nanobot.config.schema import QQConfig, QQInstanceConfig
 
 try:
     import botpy
@@ -56,9 +56,9 @@ class QQChannel(BaseChannel):
     name = "qq"
     display_name = "QQ"
 
-    def __init__(self, config: QQConfig, bus: MessageBus):
+    def __init__(self, config: QQConfig | QQInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: QQConfig = config
+        self.config: QQConfig | QQInstanceConfig = config
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
         self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重

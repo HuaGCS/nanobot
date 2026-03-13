@@ -16,7 +16,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_runtime_subdir
-from nanobot.config.schema import MochatConfig
+from nanobot.config.schema import MochatConfig, MochatInstanceConfig
+from nanobot.utils.helpers import safe_filename
 
 try:
     import socketio
@@ -218,14 +219,14 @@ class MochatChannel(BaseChannel):
     name = "mochat"
     display_name = "Mochat"
 
-    def __init__(self, config: MochatConfig, bus: MessageBus):
+    def __init__(self, config: MochatConfig | MochatInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: MochatConfig = config
+        self.config: MochatConfig | MochatInstanceConfig = config
         self._http: httpx.AsyncClient | None = None
         self._socket: Any = None
         self._ws_connected = self._ws_ready = False
 
-        self._state_dir = get_runtime_subdir("mochat")
+        self._state_dir = self._get_state_dir()
         self._cursor_path = self._state_dir / "session_cursors.json"
         self._session_cursor: dict[str, int] = {}
         self._cursor_save_task: asyncio.Task | None = None
@@ -246,6 +247,17 @@ class MochatChannel(BaseChannel):
         self._panel_fallback_tasks: dict[str, asyncio.Task] = {}
         self._refresh_task: asyncio.Task | None = None
         self._target_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_state_dir(self):
+        """Return the runtime state directory for this channel instance."""
+        base = get_runtime_subdir("mochat")
+        instance_name = (
+            getattr(self.config, "name", "")
+            or (self.name.split("/", 1)[1] if "/" in self.name else "")
+        )
+        if not instance_name:
+            return base
+        return base / safe_filename(instance_name)
 
     # ---- lifecycle ---------------------------------------------------------
 

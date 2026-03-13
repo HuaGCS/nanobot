@@ -19,7 +19,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import EmailConfig
+from nanobot.config.schema import EmailConfig, EmailInstanceConfig
 
 
 class EmailChannel(BaseChannel):
@@ -51,9 +51,9 @@ class EmailChannel(BaseChannel):
         "Dec",
     )
 
-    def __init__(self, config: EmailConfig, bus: MessageBus):
+    def __init__(self, config: EmailConfig | EmailInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: EmailConfig = config
+        self.config: EmailConfig | EmailInstanceConfig = config
         self._last_subject_by_chat: dict[str, str] = {}
         self._last_message_id_by_chat: dict[str, str] = {}
         self._processed_uids: set[str] = set()  # Capped to prevent unbounded growth

@@ -1,9 +1,9 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -23,6 +23,19 @@ class WhatsAppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
 
+class WhatsAppInstanceConfig(WhatsAppConfig):
+    """WhatsApp bridge instance config for multi-bot mode."""
+
+    name: str = Field(min_length=1)
+
+
+class WhatsAppMultiConfig(Base):
+    """WhatsApp channel configuration supporting multiple bridge instances."""
+
+    enabled: bool = False
+    instances: list[WhatsAppInstanceConfig] = Field(default_factory=list)
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -34,6 +47,19 @@ class TelegramConfig(Base):
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
+
+
+class TelegramInstanceConfig(TelegramConfig):
+    """Telegram bot instance config for multi-bot mode."""
+
+    name: str = Field(min_length=1)
+
+
+class TelegramMultiConfig(Base):
+    """Telegram channel configuration supporting multiple bot instances."""
+
+    enabled: bool = False
+    instances: list[TelegramInstanceConfig] = Field(default_factory=list)
 
 
 class FeishuConfig(Base):
@@ -51,6 +77,19 @@ class FeishuConfig(Base):
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned, "open" responds to all
 
 
+class FeishuInstanceConfig(FeishuConfig):
+    """Feishu bot instance config for multi-bot mode."""
+
+    name: str = Field(min_length=1)
+
+
+class FeishuMultiConfig(Base):
+    """Feishu channel configuration supporting multiple bot instances."""
+
+    enabled: bool = False
+    instances: list[FeishuInstanceConfig] = Field(default_factory=list)
+
+
 class DingTalkConfig(Base):
     """DingTalk channel configuration using Stream mode."""
 
@@ -58,6 +97,19 @@ class DingTalkConfig(Base):
     client_id: str = ""  # AppKey
     client_secret: str = ""  # AppSecret
     allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
+
+
+class DingTalkInstanceConfig(DingTalkConfig):
+    """DingTalk bot instance config for multi-bot mode."""
+
+    name: str = Field(min_length=1)
+
+
+class DingTalkMultiConfig(Base):
+    """DingTalk channel configuration supporting multiple bot instances."""
+
+    enabled: bool = False
+    instances: list[DingTalkInstanceConfig] = Field(default_factory=list)
 
 
 class DiscordConfig(Base):
@@ -69,6 +121,19 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
     group_policy: Literal["mention", "open"] = "mention"
+
+
+class DiscordInstanceConfig(DiscordConfig):
+    """Discord bot instance config for multi-bot mode."""
+
+    name: str = Field(min_length=1)
+
+
+class DiscordMultiConfig(Base):
+    """Discord channel configuration supporting multiple bot instances."""
+
+    enabled: bool = False
+    instances: list[DiscordInstanceConfig] = Field(default_factory=list)
 
 
 class MatrixConfig(Base):
@@ -90,6 +155,19 @@ class MatrixConfig(Base):
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
+
+
+class MatrixInstanceConfig(MatrixConfig):
+    """Matrix bot/account instance config for multi-account mode."""
+
+    name: str = Field(min_length=1)
+
+
+class MatrixMultiConfig(Base):
+    """Matrix channel configuration supporting multiple accounts."""
+
+    enabled: bool = False
+    instances: list[MatrixInstanceConfig] = Field(default_factory=list)
 
 
 class EmailConfig(Base):
@@ -124,6 +202,19 @@ class EmailConfig(Base):
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
+
+
+class EmailInstanceConfig(EmailConfig):
+    """Email account instance config for multi-account mode."""
+
+    name: str = Field(min_length=1)
+
+
+class EmailMultiConfig(Base):
+    """Email channel configuration supporting multiple accounts."""
+
+    enabled: bool = False
+    instances: list[EmailInstanceConfig] = Field(default_factory=list)
 
 
 class MochatMentionConfig(Base):
@@ -165,6 +256,19 @@ class MochatConfig(Base):
     reply_delay_ms: int = 120000
 
 
+class MochatInstanceConfig(MochatConfig):
+    """Mochat account instance config for multi-account mode."""
+
+    name: str = Field(min_length=1)
+
+
+class MochatMultiConfig(Base):
+    """Mochat channel configuration supporting multiple accounts."""
+
+    enabled: bool = False
+    instances: list[MochatInstanceConfig] = Field(default_factory=list)
+
+
 class SlackDMConfig(Base):
     """Slack DM policy configuration."""
 
@@ -190,15 +294,39 @@ class SlackConfig(Base):
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
+class SlackInstanceConfig(SlackConfig):
+    """Slack bot instance config for multi-bot mode."""
+
+    name: str = Field(min_length=1)
+
+
+class SlackMultiConfig(Base):
+    """Slack channel configuration supporting multiple bot instances."""
+
+    enabled: bool = False
+    instances: list[SlackInstanceConfig] = Field(default_factory=list)
+
+
 class QQConfig(Base):
-    """QQ channel configuration using botpy SDK."""
+    """QQ channel configuration using botpy SDK (single instance)."""
 
     enabled: bool = False
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(
-        default_factory=list
-    )  # Allowed user openids (empty = public access)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids
+
+
+class QQInstanceConfig(QQConfig):
+    """QQ bot instance config for multi-bot mode."""
+
+    name: str = Field(min_length=1)  # instance key, routed as channel name "qq/<name>"
+
+
+class QQMultiConfig(Base):
+    """QQ channel configuration supporting multiple bot instances."""
+
+    enabled: bool = False
+    instances: list[QQInstanceConfig] = Field(default_factory=list)
 
 
 class WecomConfig(Base):
@@ -211,22 +339,82 @@ class WecomConfig(Base):
     welcome_message: str = ""  # Welcome message for enter_chat event
 
 
+class WecomInstanceConfig(WecomConfig):
+    """WeCom bot instance config for multi-bot mode."""
+
+    name: str = Field(min_length=1)
+
+
+class WecomMultiConfig(Base):
+    """WeCom channel configuration supporting multiple bot instances."""
+
+    enabled: bool = False
+    instances: list[WecomInstanceConfig] = Field(default_factory=list)
+
+
+def _coerce_multi_channel_config(
+    value: Any,
+    single_cls: type[BaseModel],
+    multi_cls: type[BaseModel],
+) -> BaseModel:
+    """Parse a channel config into single- or multi-instance form."""
+    if isinstance(value, (single_cls, multi_cls)):
+        return value
+    if value is None:
+        return single_cls()
+    if isinstance(value, dict) and "instances" in value:
+        return multi_cls.model_validate(value)
+    return single_cls.model_validate(value)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
-    whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
-    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
-    discord: DiscordConfig = Field(default_factory=DiscordConfig)
-    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
-    mochat: MochatConfig = Field(default_factory=MochatConfig)
-    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
-    email: EmailConfig = Field(default_factory=EmailConfig)
-    slack: SlackConfig = Field(default_factory=SlackConfig)
-    qq: QQConfig = Field(default_factory=QQConfig)
-    matrix: MatrixConfig = Field(default_factory=MatrixConfig)
-    wecom: WecomConfig = Field(default_factory=WecomConfig)
+    whatsapp: WhatsAppConfig | WhatsAppMultiConfig = Field(default_factory=WhatsAppConfig)
+    telegram: TelegramConfig | TelegramMultiConfig = Field(default_factory=TelegramConfig)
+    discord: DiscordConfig | DiscordMultiConfig = Field(default_factory=DiscordConfig)
+    feishu: FeishuConfig | FeishuMultiConfig = Field(default_factory=FeishuConfig)
+    mochat: MochatConfig | MochatMultiConfig = Field(default_factory=MochatConfig)
+    dingtalk: DingTalkConfig | DingTalkMultiConfig = Field(default_factory=DingTalkConfig)
+    email: EmailConfig | EmailMultiConfig = Field(default_factory=EmailConfig)
+    slack: SlackConfig | SlackMultiConfig = Field(default_factory=SlackConfig)
+    qq: QQConfig | QQMultiConfig = Field(default_factory=QQConfig)
+    matrix: MatrixConfig | MatrixMultiConfig = Field(default_factory=MatrixConfig)
+    wecom: WecomConfig | WecomMultiConfig = Field(default_factory=WecomConfig)
+
+    @field_validator(
+        "whatsapp",
+        "telegram",
+        "discord",
+        "feishu",
+        "mochat",
+        "dingtalk",
+        "email",
+        "slack",
+        "qq",
+        "matrix",
+        "wecom",
+        mode="before",
+    )
+    @classmethod
+    def _parse_multi_instance_channels(cls, value: Any, info: ValidationInfo) -> BaseModel:
+        mapping: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
+            "whatsapp": (WhatsAppConfig, WhatsAppMultiConfig),
+            "telegram": (TelegramConfig, TelegramMultiConfig),
+            "discord": (DiscordConfig, DiscordMultiConfig),
+            "feishu": (FeishuConfig, FeishuMultiConfig),
+            "mochat": (MochatConfig, MochatMultiConfig),
+            "dingtalk": (DingTalkConfig, DingTalkMultiConfig),
+            "email": (EmailConfig, EmailMultiConfig),
+            "slack": (SlackConfig, SlackMultiConfig),
+            "qq": (QQConfig, QQMultiConfig),
+            "matrix": (MatrixConfig, MatrixMultiConfig),
+            "wecom": (WecomConfig, WecomMultiConfig),
+        }
+        single_cls, multi_cls = mapping[info.field_name]
+        return _coerce_multi_channel_config(value, single_cls, multi_cls)
 
 
 class AgentDefaults(Base):

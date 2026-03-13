@@ -10,7 +10,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import WhatsAppConfig
+from nanobot.config.schema import WhatsAppConfig, WhatsAppInstanceConfig
 
 
 class WhatsAppChannel(BaseChannel):
@@ -24,9 +24,9 @@ class WhatsAppChannel(BaseChannel):
     name = "whatsapp"
     display_name = "WhatsApp"
 
-    def __init__(self, config: WhatsAppConfig, bus: MessageBus):
+    def __init__(self, config: WhatsAppConfig | WhatsAppInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: WhatsAppConfig = config
+        self.config: WhatsAppConfig | WhatsAppInstanceConfig = config
         self._ws = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()

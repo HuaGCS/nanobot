@@ -40,6 +40,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_data_dir, get_media_dir
+from nanobot.config.schema import MatrixConfig, MatrixInstanceConfig
 from nanobot.utils.helpers import safe_filename
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
@@ -149,8 +150,9 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(self, config: MatrixConfig | MatrixInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
+        self.config: MatrixConfig | MatrixInstanceConfig = config
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
@@ -159,12 +161,23 @@ class MatrixChannel(BaseChannel):
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
 
+    def _get_store_path(self) -> Path:
+        """Return the Matrix sync/encryption store path for this channel instance."""
+        base = get_data_dir() / "matrix-store"
+        instance_name = (
+            getattr(self.config, "name", "")
+            or (self.name.split("/", 1)[1] if "/" in self.name else "")
+        )
+        if not instance_name:
+            return base
+        return base / safe_filename(instance_name)
+
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
         self._running = True
         _configure_nio_logging_bridge()
 
-        store_path = get_data_dir() / "matrix-store"
+        store_path = self._get_store_path()
         store_path.mkdir(parents=True, exist_ok=True)
 
         self.client = AsyncClient(

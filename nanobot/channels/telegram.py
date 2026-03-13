@@ -17,7 +17,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.agent.i18n import help_lines, normalize_language_code, telegram_command_descriptions, text
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import TelegramConfig, TelegramInstanceConfig
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
@@ -161,9 +161,9 @@ class TelegramChannel(BaseChannel):
 
     COMMAND_NAMES = ("start", "new", "lang", "persona", "stop", "help", "restart")
 
-    def __init__(self, config: TelegramConfig, bus: MessageBus):
+    def __init__(self, config: TelegramConfig | TelegramInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: TelegramConfig = config
+        self.config: TelegramConfig | TelegramInstanceConfig = config
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task

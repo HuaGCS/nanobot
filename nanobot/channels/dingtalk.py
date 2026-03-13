@@ -15,7 +15,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import DingTalkConfig
+from nanobot.config.schema import DingTalkConfig, DingTalkInstanceConfig
 
 try:
     from dingtalk_stream import (
@@ -119,9 +119,9 @@ class DingTalkChannel(BaseChannel):
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
-    def __init__(self, config: DingTalkConfig, bus: MessageBus):
+    def __init__(self, config: DingTalkConfig | DingTalkInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: DingTalkConfig = config
+        self.config: DingTalkConfig | DingTalkInstanceConfig = config
         self._client: Any = None
         self._http: httpx.AsyncClient | None = None
 

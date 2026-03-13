@@ -15,7 +15,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import FeishuConfig
+from nanobot.config.schema import FeishuConfig, FeishuInstanceConfig
 
 import importlib.util
 
@@ -246,9 +246,9 @@ class FeishuChannel(BaseChannel):
     name = "feishu"
     display_name = "Feishu"
 
-    def __init__(self, config: FeishuConfig, bus: MessageBus):
+    def __init__(self, config: FeishuConfig | FeishuInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: FeishuConfig = config
+        self.config: FeishuConfig | FeishuInstanceConfig = config
         self._client: Any = None
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None

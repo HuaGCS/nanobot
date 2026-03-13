@@ -12,7 +12,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import WecomConfig
+from nanobot.config.schema import WecomConfig, WecomInstanceConfig
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
 
@@ -38,9 +38,9 @@ class WecomChannel(BaseChannel):
     name = "wecom"
     display_name = "WeCom"
 
-    def __init__(self, config: WecomConfig, bus: MessageBus):
+    def __init__(self, config: WecomConfig | WecomInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: WecomConfig = config
+        self.config: WecomConfig | WecomInstanceConfig = config
         self._client: Any = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._loop: asyncio.AbstractEventLoop | None = None

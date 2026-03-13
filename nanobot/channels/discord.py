@@ -13,7 +13,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import DiscordConfig
+from nanobot.config.schema import DiscordConfig, DiscordInstanceConfig
 from nanobot.utils.helpers import split_message
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
@@ -27,9 +27,9 @@ class DiscordChannel(BaseChannel):
     name = "discord"
     display_name = "Discord"
 
-    def __init__(self, config: DiscordConfig, bus: MessageBus):
+    def __init__(self, config: DiscordConfig | DiscordInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: DiscordConfig = config
+        self.config: DiscordConfig | DiscordInstanceConfig = config
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._seq: int | None = None
         self._heartbeat_task: asyncio.Task | None = None

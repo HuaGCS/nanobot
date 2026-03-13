@@ -42,10 +42,41 @@ class ChannelManager:
                 continue
             try:
                 cls = load_channel_class(modname)
-                channel = cls(section, self.bus)
-                channel.transcription_api_key = groq_key
-                self.channels[modname] = channel
-                logger.info("{} channel enabled", cls.display_name)
+                instances = getattr(section, "instances", None)
+                if instances is not None:
+                    if not instances:
+                        logger.warning(
+                            "{} channel enabled but no instances configured",
+                            cls.display_name,
+                        )
+                        continue
+
+                    for inst in instances:
+                        inst_name = getattr(inst, "name", None)
+                        if not inst_name:
+                            raise ValueError(
+                                f'{modname}.instances item missing required field "name"'
+                            )
+
+                        # Session keys use "channel:chat_id", so instance names cannot use ":".
+                        channel_name = f"{modname}/{inst_name}"
+                        if channel_name in self.channels:
+                            raise ValueError(f"Duplicate channel instance name: {channel_name}")
+
+                        channel = cls(inst, self.bus)
+                        channel.name = channel_name
+                        channel.transcription_api_key = groq_key
+                        self.channels[channel_name] = channel
+                        logger.info(
+                            "{} channel instance enabled: {}",
+                            cls.display_name,
+                            channel_name,
+                        )
+                else:
+                    channel = cls(section, self.bus)
+                    channel.transcription_api_key = groq_key
+                    self.channels[modname] = channel
+                    logger.info("{} channel enabled", cls.display_name)
             except ImportError as e:
                 logger.warning("{} channel not available: {}", modname, e)
 

@@ -265,6 +265,36 @@ Connect nanobot to your favorite chat platform.
 | **QQ** | App ID + App Secret |
 | **Wecom** | Bot ID + Bot Secret |
 
+Multi-bot support is available for `whatsapp`, `telegram`, `discord`, `feishu`, `mochat`,
+`dingtalk`, `slack`, `email`, `qq`, `matrix`, and `wecom`.
+Use `instances` when you want more than one bot/account for the same channel; each instance is
+routed as `channel/name`.
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "instances": [
+        {
+          "name": "main",
+          "token": "BOT_TOKEN_A",
+          "allowFrom": ["YOUR_USER_ID"]
+        },
+        {
+          "name": "backup",
+          "token": "BOT_TOKEN_B",
+          "allowFrom": ["YOUR_USER_ID"]
+        }
+      ]
+    }
+  }
+}
+```
+
+For `whatsapp`, each instance should point to its own bridge process with its own `bridgeUrl`
+and bridge auth/session directory.
+
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
 
@@ -349,6 +379,9 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
   }
 }
 ```
+
+> Multi-account mode is also supported with `instances`; each instance keeps its Mochat runtime
+> cursors in its own state directory automatically.
 
 
 
@@ -451,6 +484,8 @@ pip install nanobot-ai[matrix]
 ```
 
 > Keep a persistent `matrix-store` and stable `deviceId` — encrypted session state is lost if these change across restarts.
+> In multi-account mode, nanobot isolates each instance into its own `matrix-store/<instance>`
+> directory automatically.
 
 | Option | Description |
 |--------|-------------|
@@ -496,6 +531,10 @@ nanobot channels login
   }
 }
 ```
+
+> Multi-bot mode is supported with `instances`, but each bot must connect to its own bridge
+> process. Run separate bridge processes with different `BRIDGE_PORT` and `AUTH_DIR`, then point
+> each instance at its own `bridgeUrl`.
 
 **3. Run** (two terminals)
 
@@ -579,6 +618,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 
 > - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
 > - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
+> - Single-bot config is still supported. For multiple bots, use `instances`, and each bot is routed as `qq/<name>`.
 
 ```json
 {
@@ -588,6 +628,32 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
       "allowFrom": ["YOUR_OPENID"]
+    }
+  }
+}
+```
+
+Multi-bot example:
+
+```json
+{
+  "channels": {
+    "qq": {
+      "enabled": true,
+      "instances": [
+        {
+          "name": "bot-a",
+          "appId": "YOUR_APP_ID_A",
+          "secret": "YOUR_APP_SECRET_A",
+          "allowFrom": ["YOUR_OPENID"]
+        },
+        {
+          "name": "bot-b",
+          "appId": "YOUR_APP_ID_B",
+          "secret": "YOUR_APP_SECRET_B",
+          "allowFrom": ["*"]
+        }
+      ]
     }
   }
 }
