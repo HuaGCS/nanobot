@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any
 
 from loguru import logger
@@ -31,18 +32,28 @@ class ChannelManager:
         self._init_channels()
 
     def _init_channels(self) -> None:
-        """Initialize channels discovered via pkgutil scan."""
-        from nanobot.channels.registry import discover_channel_names, load_channel_class
+        """Initialize channels discovered via pkgutil scan + entry_points plugins."""
+        from nanobot.channels.registry import discover_all
 
         groq_key = self.config.providers.groq.api_key
 
-        for modname in discover_channel_names():
-            section = getattr(self.config.channels, modname, None)
-            if not section or not getattr(section, "enabled", False):
+        for name, cls in discover_all().items():
+            section = getattr(self.config.channels, name, None)
+            if section is None:
+                continue
+            enabled = (
+                section.get("enabled", False)
+                if isinstance(section, dict)
+                else getattr(section, "enabled", False)
+            )
+            if not enabled:
                 continue
             try:
-                cls = load_channel_class(modname)
-                instances = getattr(section, "instances", None)
+                instances = (
+                    section.get("instances")
+                    if isinstance(section, dict)
+                    else getattr(section, "instances", None)
+                )
                 if instances is not None:
                     if not instances:
                         logger.warning(
@@ -52,18 +63,22 @@ class ChannelManager:
                         continue
 
                     for inst in instances:
-                        inst_name = getattr(inst, "name", None)
+                        inst_name = (
+                            inst.get("name")
+                            if isinstance(inst, dict)
+                            else getattr(inst, "name", None)
+                        )
                         if not inst_name:
                             raise ValueError(
-                                f'{modname}.instances item missing required field "name"'
+                                f'{name}.instances item missing required field "name"'
                             )
 
                         # Session keys use "channel:chat_id", so instance names cannot use ":".
-                        channel_name = f"{modname}/{inst_name}"
+                        channel_name = f"{name}/{inst_name}"
                         if channel_name in self.channels:
                             raise ValueError(f"Duplicate channel instance name: {channel_name}")
 
-                        channel = cls(inst, self.bus)
+                        channel = self._instantiate_channel(cls, inst)
                         channel.name = channel_name
                         channel.transcription_api_key = groq_key
                         self.channels[channel_name] = channel
@@ -72,15 +87,35 @@ class ChannelManager:
                             cls.display_name,
                             channel_name,
                         )
-                else:
-                    channel = cls(section, self.bus)
-                    channel.transcription_api_key = groq_key
-                    self.channels[modname] = channel
-                    logger.info("{} channel enabled", cls.display_name)
-            except ImportError as e:
-                logger.warning("{} channel not available: {}", modname, e)
+                    continue
+
+                channel = self._instantiate_channel(cls, section)
+                channel.name = name
+                channel.transcription_api_key = groq_key
+                self.channels[name] = channel
+                logger.info("{} channel enabled", cls.display_name)
+            except Exception as e:
+                logger.warning("{} channel not available: {}", name, e)
 
         self._validate_allow_from()
+
+    def _instantiate_channel(self, cls: type[BaseChannel], section: Any) -> BaseChannel:
+        """Instantiate a channel, passing optional supported kwargs when available."""
+        kwargs: dict[str, Any] = {}
+        try:
+            params = inspect.signature(cls.__init__).parameters
+        except (TypeError, ValueError):
+            params = {}
+
+        tools = getattr(self.config, "tools", None)
+        if "restrict_to_workspace" in params:
+            kwargs["restrict_to_workspace"] = bool(
+                getattr(tools, "restrict_to_workspace", False)
+            )
+        if "workspace" in params:
+            kwargs["workspace"] = getattr(self.config, "workspace_path", None)
+
+        return cls(section, self.bus, **kwargs)
 
     def _validate_allow_from(self) -> None:
         for name, ch in self.channels.items():

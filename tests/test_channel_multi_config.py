@@ -46,8 +46,10 @@ class _DummyChannel(BaseChannel):
 
 
 def _patch_registry(monkeypatch: pytest.MonkeyPatch, channel_names: list[str]) -> None:
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: channel_names)
-    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _: _DummyChannel)
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_all",
+        lambda: {name: _DummyChannel for name in channel_names},
+    )
 
 
 @pytest.mark.parametrize(
@@ -178,7 +180,7 @@ def test_config_parses_supported_single_instance_channels(
 
 
 @pytest.mark.parametrize(
-    ("field_name", "payload", "expected_cls", "attr_name", "attr_value"),
+    ("field_name", "payload", "expected_cls", "expected_names", "attr_name", "attr_value"),
     [
         (
             "whatsapp",
@@ -190,6 +192,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             WhatsAppMultiConfig,
+            ["main", "backup"],
             "bridge_url",
             "ws://127.0.0.1:3002",
         ),
@@ -203,6 +206,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             TelegramMultiConfig,
+            ["main", "backup"],
             "token",
             "tg-backup",
         ),
@@ -216,6 +220,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             DiscordMultiConfig,
+            ["main", "backup"],
             "token",
             "dc-backup",
         ),
@@ -234,6 +239,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             FeishuMultiConfig,
+            ["main", "backup"],
             "app_id",
             "fs-backup",
         ),
@@ -257,6 +263,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             DingTalkMultiConfig,
+            ["main", "backup"],
             "client_id",
             "dt-backup",
         ),
@@ -282,6 +289,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             MatrixMultiConfig,
+            ["main", "backup"],
             "homeserver",
             "https://matrix-2.example.com",
         ),
@@ -305,6 +313,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             EmailMultiConfig,
+            ["work", "home"],
             "imap_host",
             "imap.home",
         ),
@@ -328,6 +337,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             MochatMultiConfig,
+            ["main", "backup"],
             "claw_token",
             "claw-backup",
         ),
@@ -351,6 +361,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             SlackMultiConfig,
+            ["main", "backup"],
             "bot_token",
             "xoxb-backup",
         ),
@@ -369,6 +380,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             QQMultiConfig,
+            ["main", "backup"],
             "app_id",
             "qq-backup",
         ),
@@ -387,6 +399,7 @@ def test_config_parses_supported_single_instance_channels(
                 ],
             },
             WecomMultiConfig,
+            ["main", "backup"],
             "bot_id",
             "wc-backup",
         ),
@@ -396,6 +409,7 @@ def test_config_parses_supported_multi_instance_channels(
     field_name: str,
     payload: dict,
     expected_cls: type,
+    expected_names: list[str],
     attr_name: str,
     attr_value: str,
 ) -> None:
@@ -403,7 +417,7 @@ def test_config_parses_supported_multi_instance_channels(
 
     section = getattr(config.channels, field_name)
     assert isinstance(section, expected_cls)
-    assert [inst.name for inst in section.instances] == ["main", "backup"]
+    assert [inst.name for inst in section.instances] == expected_names
     assert getattr(section.instances[1], attr_name) == attr_value
 
 
