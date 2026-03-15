@@ -39,7 +39,7 @@ except ImportError as e:
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.paths import get_data_dir, get_media_dir
+from nanobot.config.paths import get_data_dir
 from nanobot.config.schema import MatrixConfig, MatrixInstanceConfig
 from nanobot.utils.helpers import safe_filename
 
@@ -150,14 +150,27 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
 
-    def __init__(self, config: MatrixConfig | MatrixInstanceConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return MatrixConfig().model_dump(by_alias=True)
+
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        *,
+        restrict_to_workspace: bool = False,
+        workspace: str | Path | None = None,
+    ):
+        if isinstance(config, dict):
+            config = MatrixConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: MatrixConfig | MatrixInstanceConfig = config
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
-        self._restrict_to_workspace = False
-        self._workspace: Path | None = None
+        self._restrict_to_workspace = restrict_to_workspace
+        self._workspace = Path(workspace).expanduser() if workspace is not None else None
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
 
@@ -504,7 +517,14 @@ class MatrixChannel(BaseChannel):
         return False
 
     def _media_dir(self) -> Path:
-        return get_media_dir("matrix")
+        base = get_data_dir() / "media" / "matrix"
+        instance_name = (
+            getattr(self.config, "name", "")
+            or (self.name.split("/", 1)[1] if "/" in self.name else "")
+        )
+        media_dir = base / safe_filename(instance_name) if instance_name else base
+        media_dir.mkdir(parents=True, exist_ok=True)
+        return media_dir
 
     @staticmethod
     def _event_source_content(event: RoomMessage) -> dict[str, Any]:
