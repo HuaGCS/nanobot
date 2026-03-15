@@ -3,6 +3,8 @@
 import asyncio
 import os
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -91,26 +93,31 @@ class ExecTool(Tool):
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=effective_timeout,
+            with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+                process = subprocess.Popen(
+                    command,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    cwd=cwd,
+                    env=env,
+                    shell=True,
                 )
-            except asyncio.TimeoutError:
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
-                return f"Error: Command timed out after {effective_timeout} seconds"
+
+                deadline = asyncio.get_running_loop().time() + effective_timeout
+                while process.poll() is None:
+                    if asyncio.get_running_loop().time() >= deadline:
+                        process.kill()
+                        try:
+                            process.wait(timeout=5.0)
+                        except subprocess.TimeoutExpired:
+                            pass
+                        return f"Error: Command timed out after {effective_timeout} seconds"
+                    await asyncio.sleep(0.05)
+
+                stdout_file.seek(0)
+                stderr_file.seek(0)
+                stdout = stdout_file.read()
+                stderr = stderr_file.read()
 
             output_parts = []
 
