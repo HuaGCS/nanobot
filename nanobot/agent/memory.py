@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import weakref
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -77,10 +79,13 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
 class MemoryStore:
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
+    _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
+
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        self._consecutive_failures = 0
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -162,25 +167,60 @@ class MemoryStore:
                     len(response.content or ""),
                     (response.content or "")[:200],
                 )
-                return False
+                return self._fail_or_raw_archive(messages)
 
             args = _normalize_save_memory_args(response.tool_calls[0].arguments)
             if args is None:
                 logger.warning("Memory consolidation: unexpected save_memory arguments")
-                return False
+                return self._fail_or_raw_archive(messages)
 
-            if entry := args.get("history_entry"):
-                self.append_history(_ensure_text(entry))
-            if update := args.get("memory_update"):
-                update = _ensure_text(update)
-                if update != current_memory:
-                    self.write_long_term(update)
+            if "history_entry" not in args or "memory_update" not in args:
+                logger.warning("Memory consolidation: save_memory payload missing required fields")
+                return self._fail_or_raw_archive(messages)
 
+            entry = args["history_entry"]
+            update = args["memory_update"]
+
+            if entry is None or update is None:
+                logger.warning("Memory consolidation: save_memory payload contains null required fields")
+                return self._fail_or_raw_archive(messages)
+
+            entry = _ensure_text(entry).strip()
+            if not entry:
+                logger.warning("Memory consolidation: history_entry is empty after normalization")
+                return self._fail_or_raw_archive(messages)
+
+            self.append_history(entry)
+            update = _ensure_text(update)
+            if update != current_memory:
+                self.write_long_term(update)
+
+            self._consecutive_failures = 0
             logger.info("Memory consolidation done for {} messages", len(messages))
             return True
         except Exception:
             logger.exception("Memory consolidation failed")
+            return self._fail_or_raw_archive(messages)
+
+    def _fail_or_raw_archive(self, messages: list[dict]) -> bool:
+        """Increment failure count; after threshold, raw-archive messages and return True."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures < self._MAX_FAILURES_BEFORE_RAW_ARCHIVE:
             return False
+        self._raw_archive(messages)
+        self._consecutive_failures = 0
+        return True
+
+    def _raw_archive(self, messages: list[dict]) -> None:
+        """Fallback: dump raw messages to HISTORY.md without LLM summarization."""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        self.append_history(
+            f"[{ts}] [RAW] {len(messages)} messages\n"
+            f"{self._format_messages(messages)}"
+        )
+        logger.warning(
+            "Memory consolidation degraded: raw-archived {} messages", len(messages)
+        )
 
 
 class MemoryConsolidator:
@@ -206,6 +246,11 @@ class MemoryConsolidator:
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._stores: dict[Path, MemoryStore] = {}
+        self._active_session: contextvars.ContextVar[Session | None] = contextvars.ContextVar(
+            "memory_consolidation_session",
+            default=None,
+        )
 
     def _get_persona(self, session: Session) -> str:
         """Resolve the active persona for a session."""
@@ -219,15 +264,23 @@ class MemoryConsolidator:
 
     def _get_store(self, session: Session) -> MemoryStore:
         """Return the memory store associated with the active persona."""
-        return MemoryStore(persona_workspace(self.workspace, self._get_persona(session)))
+        store_root = persona_workspace(self.workspace, self._get_persona(session))
+        return self._stores.setdefault(store_root, MemoryStore(store_root))
+
+    def _get_default_store(self) -> MemoryStore:
+        """Return the default persona store for session-less consolidation contexts."""
+        store_root = persona_workspace(self.workspace, DEFAULT_PERSONA)
+        return self._stores.setdefault(store_root, MemoryStore(store_root))
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
 
-    async def consolidate_messages(self, session: Session, messages: list[dict[str, object]]) -> bool:
+    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
         """Archive a selected message chunk into persistent memory."""
-        return await self._get_store(session).consolidate(messages, self.provider, self.model)
+        session = self._active_session.get()
+        store = self._get_store(session) if session is not None else self._get_default_store()
+        return await store.consolidate(messages, self.provider, self.model)
 
     def pick_consolidation_boundary(
         self,
@@ -270,14 +323,37 @@ class MemoryConsolidator:
             self._get_tool_definitions(),
         )
 
+    async def _archive_messages_locked(
+        self,
+        session: Session,
+        messages: list[dict[str, object]],
+    ) -> bool:
+        """Archive messages with guaranteed persistence (retries until raw-dump fallback)."""
+        if not messages:
+            return True
+        token = self._active_session.set(session)
+        try:
+            for _ in range(self._get_store(session)._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
+                if await self.consolidate_messages(messages):
+                    return True
+        finally:
+            self._active_session.reset(token)
+        return True
+
+    async def archive_messages(self, session: Session, messages: list[dict[str, object]]) -> bool:
+        """Archive messages in the background with session-scoped memory persistence."""
+        lock = self.get_lock(session.key)
+        async with lock:
+            return await self._archive_messages_locked(session, messages)
+
     async def archive_unconsolidated(self, session: Session) -> bool:
-        """Archive the full unconsolidated tail for /new-style session rollover."""
+        """Archive the full unconsolidated tail for persona switch and similar rollover flows."""
         lock = self.get_lock(session.key)
         async with lock:
             snapshot = session.messages[session.last_consolidated:]
             if not snapshot:
                 return True
-            return await self.consolidate_messages(session, snapshot)
+            return await self._archive_messages_locked(session, snapshot)
 
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
         """Loop: archive old messages until prompt fits within half the context window."""
@@ -327,8 +403,12 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.consolidate_messages(session, chunk):
-                    return
+                token = self._active_session.set(session)
+                try:
+                    if not await self.consolidate_messages(chunk):
+                        return
+                finally:
+                    self._active_session.reset(token)
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
 
