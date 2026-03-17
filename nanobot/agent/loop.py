@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable
@@ -57,7 +58,19 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 16_000
-    _CLAWHUB_TIMEOUT_SECONDS = 300
+    _CLAWHUB_TIMEOUT_SECONDS = 60
+    _CLAWHUB_INSTALL_TIMEOUT_SECONDS = 180
+    _CLAWHUB_NETWORK_ERROR_MARKERS = (
+        "eai_again",
+        "enotfound",
+        "etimedout",
+        "econnrefused",
+        "econnreset",
+        "fetch failed",
+        "network request failed",
+        "registry.npmjs.org",
+    )
+    _CLAWHUB_NPM_CACHE_DIR = Path(tempfile.gettempdir()) / "nanobot-npm-cache"
 
     def __init__(
         self,
@@ -183,15 +196,40 @@ class AgentLoop:
         """Decode subprocess output conservatively for CLI surfacing."""
         return data.decode("utf-8", errors="replace").strip()
 
-    async def _run_clawhub(self, language: str, *args: str) -> tuple[int, str]:
+    @classmethod
+    def _is_clawhub_network_error(cls, output: str) -> bool:
+        lowered = output.lower()
+        return any(marker in lowered for marker in cls._CLAWHUB_NETWORK_ERROR_MARKERS)
+
+    def _format_clawhub_error(self, language: str, code: int, output: str) -> str:
+        if output and self._is_clawhub_network_error(output):
+            return "\n\n".join([text(language, "skill_command_network_failed"), output])
+        return output or text(language, "skill_command_failed", code=code)
+
+    def _clawhub_env(self) -> dict[str, str]:
+        """Configure npm so ClawHub fails fast and uses a writable cache directory."""
+        env = os.environ.copy()
+        env.setdefault("NO_COLOR", "1")
+        env.setdefault("FORCE_COLOR", "0")
+        env.setdefault("npm_config_cache", str(self._CLAWHUB_NPM_CACHE_DIR))
+        env.setdefault("npm_config_update_notifier", "false")
+        env.setdefault("npm_config_audit", "false")
+        env.setdefault("npm_config_fund", "false")
+        env.setdefault("npm_config_fetch_retries", "0")
+        env.setdefault("npm_config_fetch_timeout", "5000")
+        env.setdefault("npm_config_fetch_retry_mintimeout", "1000")
+        env.setdefault("npm_config_fetch_retry_maxtimeout", "5000")
+        return env
+
+    async def _run_clawhub(
+        self, language: str, *args: str, timeout_seconds: int | None = None,
+    ) -> tuple[int, str]:
         """Run the ClawHub CLI and return (exit_code, combined_output)."""
         npx = shutil.which("npx")
         if not npx:
             return 127, text(language, "skill_npx_missing")
 
-        env = os.environ.copy()
-        env.setdefault("NO_COLOR", "1")
-        env.setdefault("FORCE_COLOR", "0")
+        env = self._clawhub_env()
 
         proc = None
         try:
@@ -205,7 +243,7 @@ class AgentLoop:
                 env=env,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=self._CLAWHUB_TIMEOUT_SECONDS,
+                proc.communicate(), timeout=timeout_seconds or self._CLAWHUB_TIMEOUT_SECONDS,
             )
         except FileNotFoundError:
             return 127, text(language, "skill_npx_missing")
@@ -231,6 +269,7 @@ class AgentLoop:
         """Handle ClawHub skill management commands for the active workspace."""
         language = self._get_session_language(session)
         parts = msg.content.strip().split()
+        search_query: str | None = None
         if len(parts) == 1:
             return OutboundMessage(
                 channel=msg.channel,
@@ -249,7 +288,14 @@ class AgentLoop:
                     chat_id=msg.chat_id,
                     content=text(language, "skill_search_missing_query"),
                 )
-            code, output = await self._run_clawhub(language, "search", query_parts[2].strip(), "--limit", "5")
+            search_query = query_parts[2].strip()
+            code, output = await self._run_clawhub(
+                language,
+                "search",
+                search_query,
+                "--limit",
+                "5",
+            )
         elif subcommand == "install":
             if len(parts) < 3:
                 return OutboundMessage(
@@ -258,13 +304,38 @@ class AgentLoop:
                     content=text(language, "skill_install_missing_slug"),
                 )
             code, output = await self._run_clawhub(
-                language, "install", parts[2], "--workdir", workspace,
+                language,
+                "install",
+                parts[2],
+                "--workdir",
+                workspace,
+                timeout_seconds=self._CLAWHUB_INSTALL_TIMEOUT_SECONDS,
+            )
+        elif subcommand == "uninstall":
+            if len(parts) < 3:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=text(language, "skill_uninstall_missing_slug"),
+                )
+            code, output = await self._run_clawhub(
+                language,
+                "uninstall",
+                parts[2],
+                "--yes",
+                "--workdir",
+                workspace,
             )
         elif subcommand == "list":
             code, output = await self._run_clawhub(language, "list", "--workdir", workspace)
         elif subcommand == "update":
             code, output = await self._run_clawhub(
-                language, "update", "--all", "--workdir", workspace,
+                language,
+                "update",
+                "--all",
+                "--workdir",
+                workspace,
+                timeout_seconds=self._CLAWHUB_INSTALL_TIMEOUT_SECONDS,
             )
         else:
             return OutboundMessage(
@@ -274,13 +345,20 @@ class AgentLoop:
             )
 
         if code != 0:
-            content = output or text(language, "skill_command_failed", code=code)
+            content = self._format_clawhub_error(language, code, output)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+
+        if subcommand == "search" and not output:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(language, "skill_search_no_results", query=search_query or ""),
+            )
 
         notes: list[str] = []
         if output:
             notes.append(output)
-        if subcommand in {"install", "update"}:
+        if subcommand in {"install", "uninstall", "update"}:
             notes.append(text(language, "skill_applied_to_workspace", workspace=workspace))
         content = "\n\n".join(notes) if notes else text(language, "skill_command_completed", command=subcommand)
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
