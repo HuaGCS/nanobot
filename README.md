@@ -1347,6 +1347,7 @@ These commands are available inside chats handled by `nanobot agent` or `nanobot
 | `/persona set <name>` | Switch persona and start a new session |
 | `/skill search <query>` | Search public skills on ClawHub |
 | `/skill install <slug>` | Install a ClawHub skill into the active workspace |
+| `/skill uninstall <slug>` | Remove a ClawHub-managed skill from the active workspace |
 | `/skill list` | List ClawHub-managed skills in the active workspace |
 | `/skill update` | Update all ClawHub-managed skills in the active workspace |
 | `/stop` | Stop the current task |
@@ -1354,8 +1355,13 @@ These commands are available inside chats handled by `nanobot agent` or `nanobot
 | `/help` | Show command help |
 
 `/skill` uses the active workspace for the current process, not a hard-coded
-`~/.nanobot/workspace` path. If you start nanobot with `--workspace`, skill install/list/update
+`~/.nanobot/workspace` path. If you start nanobot with `--workspace`, skill install/uninstall/list/update
 operate on that workspace's `skills/` directory.
+
+`/skill search` can legitimately return no matches. In that case nanobot now replies with a
+clear "no skills found" message instead of leaving the channel on a transient searching state.
+If `npx clawhub@latest` cannot reach the npm registry, nanobot also surfaces the registry/network
+error directly so the failure is visible to the user.
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>

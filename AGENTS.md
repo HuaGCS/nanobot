@@ -24,12 +24,16 @@ Recent history favors short Conventional Commit subjects such as `fix(memory): .
 
 ## Security & Configuration Tips
 Do not commit real API keys, tokens, chat logs, or workspace data. Keep local secrets in `~/.nanobot/config.json` and use sanitized examples in docs and tests. If you change authentication, network access, or other safety-sensitive behavior, update `README.md` or `SECURITY.md` in the same PR.
+- If a change affects user-visible behavior, commands, workflows, or contributor conventions, update both `README.md` and `AGENTS.md` in the same patch so runtime docs and repo rules stay aligned.
 
 ## Chat Commands & Skills
 - Slash commands are handled in `nanobot/agent/loop.py`; keep parsing logic there instead of scattering command behavior across channels.
 - When a slash command changes user-visible wording, update both `nanobot/locales/en.json` and `nanobot/locales/zh.json`.
 - If a slash command should appear in Telegram's native command menu, also update `nanobot/channels/telegram.py`.
+- `/skill` currently supports `search`, `install`, `uninstall`, `list`, and `update`. Keep subcommand dispatch in `nanobot/agent/loop.py`.
 - `/skill` shells out to `npx clawhub@latest`; it requires Node.js/`npx` at runtime.
+- `/skill uninstall` runs in a non-interactive context, so keep passing `--yes` when shelling out to ClawHub.
+- Treat empty `/skill search` output as a user-visible "no results" case rather than a silent success. Surface npm/registry failures directly to the user.
 - Never hardcode `~/.nanobot/workspace` for skill installation or lookup. Use the active runtime workspace from config or `--workspace`.
 - Workspace skills in `<workspace>/skills/` take precedence over built-in skills with the same directory name.
 
