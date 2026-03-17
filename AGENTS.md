@@ -1,0 +1,49 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+`nanobot/` is the main Python package. Core agent logic lives in `nanobot/agent/`, channel integrations in `nanobot/channels/`, providers in `nanobot/providers/`, and CLI/config code in `nanobot/cli/` and `nanobot/config/`. Localized command/help text lives in `nanobot/locales/`. Bundled prompts and built-in skills live in `nanobot/templates/` and `nanobot/skills/`, while workspace-installed skills are loaded from `<workspace>/skills/`. Tests go in `tests/` with `test_<feature>.py` names. The WhatsApp bridge is a separate TypeScript project in `bridge/`.
+
+## Build, Test, and Development Commands
+- `uv sync --extra dev`: install Python runtime and developer dependencies from `pyproject.toml` and `uv.lock`.
+- `uv run pytest`: run the full Python test suite.
+- `uv run pytest tests/test_web_tools.py -q`: run one focused test file during iteration.
+- `uv run pytest tests/test_skill_commands.py -q`: run the ClawHub slash-command regression tests.
+- `uv run ruff check .`: lint Python code and normalize import ordering.
+- `uv run nanobot agent`: start the local CLI agent.
+- `cd bridge && npm install && npm run build`: install and compile the WhatsApp bridge.
+- `bash tests/test_docker.sh`: smoke-test the Docker image and onboarding flow.
+
+## Coding Style & Naming Conventions
+Target Python 3.11+ and keep Python code consistent with Ruff: 4-space indentation, `snake_case` for functions/modules, `PascalCase` for classes, and `UPPER_SNAKE_CASE` for constants. Ruff uses a 100-character target; stay near it even though long-line errors are ignored. Prefer explicit type hints and small functions. In `bridge/src/`, keep the current ESM TypeScript style and avoid reformatting unrelated lines.
+
+## Testing Guidelines
+Write pytest tests using `tests/test_<feature>.py` naming. Add a regression test for every bug fix and cover async flows, channel adapters, and tool behavior when touched. If you change slash commands or command help, update the related loop/localization tests and, when relevant, Telegram command-menu coverage. `pytest-asyncio` is already enabled with automatic asyncio handling. There is no published coverage gate, so prefer targeted assertions over smoke-only tests.
+
+## Commit & Pull Request Guidelines
+Recent history favors short Conventional Commit subjects such as `fix(memory): ...`, `feat(web): ...`, and `docs: ...`. Use imperative mood, add a scope when it helps, and keep unrelated changes out of the same commit. PRs should summarize the behavior change, note config or channel impact, list the tests you ran, and link the relevant issue or PR discussion. Include screenshots only when CLI output or user-visible behavior changed.
+
+## Security & Configuration Tips
+Do not commit real API keys, tokens, chat logs, or workspace data. Keep local secrets in `~/.nanobot/config.json` and use sanitized examples in docs and tests. If you change authentication, network access, or other safety-sensitive behavior, update `README.md` or `SECURITY.md` in the same PR.
+
+## Chat Commands & Skills
+- Slash commands are handled in `nanobot/agent/loop.py`; keep parsing logic there instead of scattering command behavior across channels.
+- When a slash command changes user-visible wording, update both `nanobot/locales/en.json` and `nanobot/locales/zh.json`.
+- If a slash command should appear in Telegram's native command menu, also update `nanobot/channels/telegram.py`.
+- `/skill` shells out to `npx clawhub@latest`; it requires Node.js/`npx` at runtime.
+- Never hardcode `~/.nanobot/workspace` for skill installation or lookup. Use the active runtime workspace from config or `--workspace`.
+- Workspace skills in `<workspace>/skills/` take precedence over built-in skills with the same directory name.
+
+## Multi-Instance Channel Notes
+The repository supports multi-instance channel configs through `channels.<name>.instances`. Each
+instance must define a unique `name`, and runtime routing uses `channel/name` rather than
+`channel:name`.
+
+- Supported multi-instance channels currently include `whatsapp`, `telegram`, `discord`,
+  `feishu`, `mochat`, `dingtalk`, `slack`, `email`, `qq`, `matrix`, and `wecom`.
+- Keep backward compatibility with single-instance configs when touching channel schema or docs.
+- If a channel persists local runtime state, isolate it per instance instead of sharing one global
+  directory.
+- `matrix` instances should keep separate sync/encryption stores.
+- `mochat` instances should keep separate cursor/runtime state.
+- `whatsapp` multi-instance means multiple bridge processes, usually with different `bridgeUrl`,
+  `BRIDGE_PORT`, and `AUTH_DIR` values.

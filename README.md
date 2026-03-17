@@ -1314,6 +1314,31 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
+### Chat Slash Commands
+
+These commands are available inside chats handled by `nanobot agent` or `nanobot gateway`:
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a new conversation |
+| `/lang current` | Show the active command language |
+| `/lang list` | List available command languages |
+| `/lang set <en\|zh>` | Switch command language |
+| `/persona current` | Show the active persona |
+| `/persona list` | List available personas |
+| `/persona set <name>` | Switch persona and start a new session |
+| `/skill search <query>` | Search public skills on ClawHub |
+| `/skill install <slug>` | Install a ClawHub skill into the active workspace |
+| `/skill list` | List ClawHub-managed skills in the active workspace |
+| `/skill update` | Update all ClawHub-managed skills in the active workspace |
+| `/stop` | Stop the current task |
+| `/restart` | Restart the bot process |
+| `/help` | Show command help |
+
+`/skill` uses the active workspace for the current process, not a hard-coded
+`~/.nanobot/workspace` path. If you start nanobot with `--workspace`, skill install/list/update
+operate on that workspace's `skills/` directory.
+
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
 

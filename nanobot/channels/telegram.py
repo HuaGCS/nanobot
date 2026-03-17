@@ -12,9 +12,14 @@ from telegram import BotCommand, ReplyParameters, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
+from nanobot.agent.i18n import (
+    help_lines,
+    normalize_language_code,
+    telegram_command_descriptions,
+    text,
+)
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.agent.i18n import help_lines, normalize_language_code, telegram_command_descriptions, text
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import TelegramConfig, TelegramInstanceConfig
@@ -159,7 +164,7 @@ class TelegramChannel(BaseChannel):
     name = "telegram"
     display_name = "Telegram"
 
-    COMMAND_NAMES = ("start", "new", "lang", "persona", "stop", "help", "restart")
+    COMMAND_NAMES = ("start", "new", "lang", "persona", "skill", "stop", "help", "restart")
 
     def __init__(self, config: TelegramConfig | TelegramInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -228,6 +233,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("lang", self._forward_command))
         self._app.add_handler(CommandHandler("persona", self._forward_command))
+        self._app.add_handler(CommandHandler("skill", self._forward_command))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))

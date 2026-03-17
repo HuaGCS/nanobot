@@ -6,10 +6,11 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -24,9 +25,9 @@ from nanobot.agent.i18n import (
     text,
 )
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -56,6 +57,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 16_000
+    _CLAWHUB_TIMEOUT_SECONDS = 300
 
     def __init__(
         self,
@@ -175,6 +177,113 @@ class AgentLoop:
             text(language, "cmd_lang_list"),
             text(language, "cmd_lang_set"),
         ])
+
+    @staticmethod
+    def _decode_subprocess_output(data: bytes) -> str:
+        """Decode subprocess output conservatively for CLI surfacing."""
+        return data.decode("utf-8", errors="replace").strip()
+
+    async def _run_clawhub(self, language: str, *args: str) -> tuple[int, str]:
+        """Run the ClawHub CLI and return (exit_code, combined_output)."""
+        npx = shutil.which("npx")
+        if not npx:
+            return 127, text(language, "skill_npx_missing")
+
+        env = os.environ.copy()
+        env.setdefault("NO_COLOR", "1")
+        env.setdefault("FORCE_COLOR", "0")
+
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                npx,
+                "--yes",
+                "clawhub@latest",
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self._CLAWHUB_TIMEOUT_SECONDS,
+            )
+        except FileNotFoundError:
+            return 127, text(language, "skill_npx_missing")
+        except asyncio.TimeoutError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.communicate()
+            return 124, text(language, "skill_command_timeout")
+        except asyncio.CancelledError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.communicate()
+            raise
+
+        output_parts = [
+            self._decode_subprocess_output(stdout),
+            self._decode_subprocess_output(stderr),
+        ]
+        output = "\n".join(part for part in output_parts if part).strip()
+        return proc.returncode or 0, output
+
+    async def _handle_skill_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        """Handle ClawHub skill management commands for the active workspace."""
+        language = self._get_session_language(session)
+        parts = msg.content.strip().split()
+        if len(parts) == 1:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(language, "skill_usage"),
+            )
+
+        subcommand = parts[1].lower()
+        workspace = str(self.workspace)
+
+        if subcommand == "search":
+            query_parts = msg.content.strip().split(None, 2)
+            if len(query_parts) < 3 or not query_parts[2].strip():
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=text(language, "skill_search_missing_query"),
+                )
+            code, output = await self._run_clawhub(language, "search", query_parts[2].strip(), "--limit", "5")
+        elif subcommand == "install":
+            if len(parts) < 3:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=text(language, "skill_install_missing_slug"),
+                )
+            code, output = await self._run_clawhub(
+                language, "install", parts[2], "--workdir", workspace,
+            )
+        elif subcommand == "list":
+            code, output = await self._run_clawhub(language, "list", "--workdir", workspace)
+        elif subcommand == "update":
+            code, output = await self._run_clawhub(
+                language, "update", "--all", "--workdir", workspace,
+            )
+        else:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(language, "skill_usage"),
+            )
+
+        if code != 0:
+            content = output or text(language, "skill_command_failed", code=code)
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+
+        notes: list[str] = []
+        if output:
+            notes.append(output)
+        if subcommand in {"install", "update"}:
+            notes.append(text(language, "skill_applied_to_workspace", workspace=workspace))
+        content = "\n\n".join(notes) if notes else text(language, "skill_command_completed", command=subcommand)
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -618,6 +727,8 @@ class AgentLoop:
             return await self._handle_language_command(msg, session)
         if cmd == "/persona":
             return await self._handle_persona_command(msg, session)
+        if cmd == "/skill":
+            return await self._handle_skill_command(msg, session)
         if cmd == "/help":
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(help_lines(language)),
