@@ -13,7 +13,6 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""
 
@@ -75,6 +74,7 @@ class FeishuConfig(Base):
         "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
     )
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned, "open" responds to all
+    reply_to_message: bool = False  # If true, replies quote the original Feishu message
 
 
 class FeishuInstanceConfig(FeishuConfig):
@@ -288,6 +288,7 @@ class SlackConfig(Base):
     user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
+    done_emoji: str = "white_check_mark"
     allow_from: list[str] = Field(default_factory=list)  # Allowed Slack user IDs (sender-level)
     group_policy: str = "mention"  # "mention", "open", "allowlist"
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed channel IDs if allowlist
@@ -365,8 +366,6 @@ def _coerce_multi_channel_config(
     if isinstance(value, dict) and "instances" in value:
         return multi_cls.model_validate(value)
     return single_cls.model_validate(value)
-
-
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
