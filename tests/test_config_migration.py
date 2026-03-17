@@ -1,9 +1,10 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import _resolve_channel_default_config, app
 from nanobot.config.loader import load_config, save_config
 
 runner = CliRunner()
@@ -129,4 +130,67 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
 
     assert result.exit_code == 0
     saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["channels"]["qq"]["msgFormat"] == "plain"
+
+
+@pytest.mark.parametrize(
+    ("channel_cls", "expected"),
+    [
+        (SimpleNamespace(), None),
+        (SimpleNamespace(default_config="invalid"), None),
+        (SimpleNamespace(default_config=lambda: None), None),
+        (SimpleNamespace(default_config=lambda: ["invalid"]), None),
+        (SimpleNamespace(default_config=lambda: {"enabled": False}), {"enabled": False}),
+    ],
+)
+def test_resolve_channel_default_config_validates_payload(channel_cls, expected) -> None:
+    assert _resolve_channel_default_config(channel_cls) == expected
+
+
+def test_resolve_channel_default_config_skips_exceptions() -> None:
+    def _raise() -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    assert _resolve_channel_default_config(SimpleNamespace(default_config=_raise)) is None
+
+
+def test_onboard_refresh_skips_invalid_channel_default_configs(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config_path.write_text(json.dumps({"channels": {}}), encoding="utf-8")
+
+    def _raise() -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
+    monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_all",
+        lambda: {
+            "missing": SimpleNamespace(),
+            "noncallable": SimpleNamespace(default_config="invalid"),
+            "none": SimpleNamespace(default_config=lambda: None),
+            "wrong_type": SimpleNamespace(default_config=lambda: ["invalid"]),
+            "raises": SimpleNamespace(default_config=_raise),
+            "qq": SimpleNamespace(
+                default_config=lambda: {
+                    "enabled": False,
+                    "appId": "",
+                    "secret": "",
+                    "allowFrom": [],
+                    "msgFormat": "plain",
+                }
+            ),
+        },
+    )
+
+    result = runner.invoke(app, ["onboard"], input="n\n")
+
+    assert result.exit_code == 0
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "missing" not in saved["channels"]
+    assert "noncallable" not in saved["channels"]
+    assert "none" not in saved["channels"]
+    assert "wrong_type" not in saved["channels"]
+    assert "raises" not in saved["channels"]
     assert saved["channels"]["qq"]["msgFormat"] == "plain"

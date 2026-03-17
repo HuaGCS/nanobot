@@ -1,11 +1,11 @@
 """CLI commands for nanobot."""
 
 import asyncio
-from contextlib import contextmanager, nullcontext
 import os
 import select
 import signal
 import sys
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -21,12 +21,11 @@ if sys.platform == "win32":
             pass
 
 import typer
-from prompt_toolkit import print_formatted_text
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import ANSI, HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
-from prompt_toolkit.application import run_in_terminal
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
@@ -337,6 +336,30 @@ def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
     return merged
 
 
+def _resolve_channel_default_config(channel_cls: Any) -> dict[str, Any] | None:
+    """Return a channel's default config if it exposes a valid onboarding payload."""
+    from loguru import logger
+
+    default_config = getattr(channel_cls, "default_config", None)
+    if not callable(default_config):
+        return None
+    try:
+        payload = default_config()
+    except Exception as exc:
+        logger.warning("Skipping channel default_config for {}: {}", channel_cls, exc)
+        return None
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        logger.warning(
+            "Skipping channel default_config for {}: expected dict, got {}",
+            channel_cls,
+            type(payload).__name__,
+        )
+        return None
+    return payload
+
+
 def _onboard_plugins(config_path: Path) -> None:
     """Inject default config for all discovered channels (built-in + plugins)."""
     import json
@@ -352,13 +375,13 @@ def _onboard_plugins(config_path: Path) -> None:
 
     channels = data.setdefault("channels", {})
     for name, cls in all_channels.items():
-        default_config = getattr(cls, "default_config", None)
-        if not callable(default_config):
+        payload = _resolve_channel_default_config(cls)
+        if payload is None:
             continue
         if name not in channels:
-            channels[name] = default_config()
+            channels[name] = payload
         else:
-            channels[name] = _merge_missing_defaults(channels[name], default_config())
+            channels[name] = _merge_missing_defaults(channels[name], payload)
 
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -366,9 +389,9 @@ def _onboard_plugins(config_path: Path) -> None:
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)

@@ -27,6 +27,10 @@ class DiscordChannel(BaseChannel):
     name = "discord"
     display_name = "Discord"
 
+    @classmethod
+    def default_config(cls) -> dict[str, object]:
+        return DiscordConfig().model_dump(by_alias=True)
+
     def __init__(self, config: DiscordConfig | DiscordInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: DiscordConfig | DiscordInstanceConfig = config

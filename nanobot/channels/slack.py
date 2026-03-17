@@ -2,7 +2,6 @@
 
 import asyncio
 import re
-from typing import Any
 
 from loguru import logger
 from slack_sdk.socket_mode.request import SocketModeRequest
@@ -22,6 +21,10 @@ class SlackChannel(BaseChannel):
 
     name = "slack"
     display_name = "Slack"
+
+    @classmethod
+    def default_config(cls) -> dict[str, object]:
+        return SlackConfig().model_dump(by_alias=True)
 
     def __init__(self, config: SlackConfig | SlackInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)

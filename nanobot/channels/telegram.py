@@ -166,6 +166,10 @@ class TelegramChannel(BaseChannel):
 
     COMMAND_NAMES = ("start", "new", "lang", "persona", "skill", "stop", "help", "restart")
 
+    @classmethod
+    def default_config(cls) -> dict[str, object]:
+        return TelegramConfig().model_dump(by_alias=True)
+
     def __init__(self, config: TelegramConfig | TelegramInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: TelegramConfig | TelegramInstanceConfig = config

@@ -23,3 +23,7 @@ def test_is_allowed_requires_exact_match() -> None:
 
     assert channel.is_allowed("allow@email.com") is True
     assert channel.is_allowed("attacker|allow@email.com") is False
+
+
+def test_default_config_returns_none_by_default() -> None:
+    assert _DummyChannel.default_config() is None

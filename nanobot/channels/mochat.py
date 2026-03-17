@@ -219,6 +219,10 @@ class MochatChannel(BaseChannel):
     name = "mochat"
     display_name = "Mochat"
 
+    @classmethod
+    def default_config(cls) -> dict[str, object]:
+        return MochatConfig().model_dump(by_alias=True)
+
     def __init__(self, config: MochatConfig | MochatInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: MochatConfig | MochatInstanceConfig = config

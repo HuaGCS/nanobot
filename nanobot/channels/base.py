@@ -24,6 +24,11 @@ class BaseChannel(ABC):
     display_name: str = "Base"
     transcription_api_key: str = ""
 
+    @classmethod
+    def default_config(cls) -> dict[str, Any] | None:
+        """Return the default config payload for onboarding, if the channel provides one."""
+        return None
+
     def __init__(self, config: Any, bus: MessageBus):
         """
         Initialize the channel.

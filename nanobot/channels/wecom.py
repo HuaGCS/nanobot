@@ -38,6 +38,10 @@ class WecomChannel(BaseChannel):
     name = "wecom"
     display_name = "WeCom"
 
+    @classmethod
+    def default_config(cls) -> dict[str, object]:
+        return WecomConfig().model_dump(by_alias=True)
+
     def __init__(self, config: WecomConfig | WecomInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: WecomConfig | WecomInstanceConfig = config

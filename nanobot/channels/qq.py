@@ -56,6 +56,10 @@ class QQChannel(BaseChannel):
     name = "qq"
     display_name = "QQ"
 
+    @classmethod
+    def default_config(cls) -> dict[str, object]:
+        return QQConfig().model_dump(by_alias=True)
+
     def __init__(self, config: QQConfig | QQInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: QQConfig | QQInstanceConfig = config
@@ -75,8 +79,8 @@ class QQChannel(BaseChannel):
             return
 
         self._running = True
-        BotClass = _make_bot_class(self)
-        self._client = BotClass()
+        bot_class = _make_bot_class(self)
+        self._client = bot_class()
         logger.info("QQ bot started (C2C & Group supported)")
         await self._run_bot()
 

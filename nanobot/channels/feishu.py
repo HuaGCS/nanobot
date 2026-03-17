@@ -1,12 +1,13 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
 import asyncio
+import importlib.util
 import json
 import os
 import re
 import threading
+import time
 from collections import OrderedDict
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -16,8 +17,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import FeishuConfig, FeishuInstanceConfig
-
-import importlib.util
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
@@ -246,6 +245,10 @@ class FeishuChannel(BaseChannel):
     name = "feishu"
     display_name = "Feishu"
 
+    @classmethod
+    def default_config(cls) -> dict[str, object]:
+        return FeishuConfig().model_dump(by_alias=True)
+
     def __init__(self, config: FeishuConfig | FeishuInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: FeishuConfig | FeishuInstanceConfig = config
@@ -314,8 +317,8 @@ class FeishuChannel(BaseChannel):
         # instead of the already-running main asyncio loop, which would cause
         # "This event loop is already running" errors.
         def run_ws():
-            import time
             import lark_oapi.ws.client as _lark_ws_client
+
             ws_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(ws_loop)
             # Patch the module-level loop used by lark's ws Client.start()
@@ -375,7 +378,12 @@ class FeishuChannel(BaseChannel):
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
-        from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody, Emoji
+        from lark_oapi.api.im.v1 import (
+            CreateMessageReactionRequest,
+            CreateMessageReactionRequestBody,
+            Emoji,
+        )
+
         try:
             request = CreateMessageReactionRequest.builder() \
                 .message_id(message_id) \

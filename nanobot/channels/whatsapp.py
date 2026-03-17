@@ -24,6 +24,10 @@ class WhatsAppChannel(BaseChannel):
     name = "whatsapp"
     display_name = "WhatsApp"
 
+    @classmethod
+    def default_config(cls) -> dict[str, object]:
+        return WhatsAppConfig().model_dump(by_alias=True)
+
     def __init__(self, config: WhatsAppConfig | WhatsAppInstanceConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: WhatsAppConfig | WhatsAppInstanceConfig = config
