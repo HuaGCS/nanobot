@@ -46,6 +46,8 @@ class TelegramConfig(Base):
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
+    connection_pool_size: int = 32  # Outbound Telegram API HTTP pool size
+    pool_timeout: float = 5.0  # Shared HTTP pool timeout for bot sends and getUpdates
 
 
 class TelegramInstanceConfig(TelegramConfig):
