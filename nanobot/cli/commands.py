@@ -491,6 +491,7 @@ def gateway(
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.config.loader import get_config_path
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
@@ -520,6 +521,7 @@ def gateway(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
+        config_path=get_config_path(),
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
@@ -683,6 +685,7 @@ def agent(
 
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
+    from nanobot.config.loader import get_config_path
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
 
@@ -706,6 +709,7 @@ def agent(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
+        config_path=get_config_path(),
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,

@@ -52,6 +52,28 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
+    def apply_runtime_config(
+        self,
+        *,
+        model: str,
+        brave_api_key: str | None,
+        web_proxy: str | None,
+        web_search_provider: str,
+        web_search_base_url: str | None,
+        web_search_max_results: int,
+        exec_config: ExecToolConfig,
+        restrict_to_workspace: bool,
+    ) -> None:
+        """Update runtime-configurable settings for future subagent tasks."""
+        self.model = model
+        self.brave_api_key = brave_api_key
+        self.web_proxy = web_proxy
+        self.web_search_provider = web_search_provider
+        self.web_search_base_url = web_search_base_url
+        self.web_search_max_results = web_search_max_results
+        self.exec_config = exec_config
+        self.restrict_to_workspace = restrict_to_workspace
+
     async def spawn(
         self,
         task: str,
@@ -209,7 +231,7 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
 
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
-    
+
     def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder

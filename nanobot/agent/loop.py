@@ -77,6 +77,7 @@ class AgentLoop:
         bus: MessageBus,
         provider: LLMProvider,
         workspace: Path,
+        config_path: Path | None = None,
         model: str | None = None,
         max_iterations: int = 40,
         context_window_tokens: int = 65_536,
@@ -97,6 +98,7 @@ class AgentLoop:
         self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
+        self.config_path = config_path
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
@@ -128,6 +130,9 @@ class AgentLoop:
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
+        self._runtime_config_mtime_ns = (
+            config_path.stat().st_mtime_ns if config_path and config_path.exists() else None
+        )
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
@@ -211,6 +216,142 @@ class AgentLoop:
                     break
 
         return {name: sorted(tools) for name, tools in grouped.items()}
+
+    def _remove_registered_mcp_tools(self) -> None:
+        """Remove all dynamically registered MCP tools from the registry."""
+        for tool_name in list(self.tools.tool_names):
+            if tool_name.startswith("mcp_"):
+                self.tools.unregister(tool_name)
+
+    @staticmethod
+    def _dump_mcp_servers(servers: dict) -> dict:
+        """Normalize MCP server config for value-based comparisons."""
+        dumped = {}
+        for name, cfg in servers.items():
+            dumped[name] = cfg.model_dump() if hasattr(cfg, "model_dump") else cfg
+        return dumped
+
+    async def _reset_mcp_connections(self) -> None:
+        """Drop MCP tool registrations and close active MCP connections."""
+        self._remove_registered_mcp_tools()
+        if self._mcp_stack:
+            try:
+                await self._mcp_stack.aclose()
+            except (RuntimeError, BaseExceptionGroup):
+                pass
+            self._mcp_stack = None
+        self._mcp_connected = False
+        self._mcp_connecting = False
+
+    def _apply_runtime_tool_config(self) -> None:
+        """Apply runtime-configurable settings to already-registered tools."""
+        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+
+        if read_tool := self.tools.get("read_file"):
+            read_tool._workspace = self.workspace
+            read_tool._allowed_dir = allowed_dir
+            read_tool._extra_allowed_dirs = extra_read
+
+        for name in ("write_file", "edit_file", "list_dir"):
+            if tool := self.tools.get(name):
+                tool._workspace = self.workspace
+                tool._allowed_dir = allowed_dir
+                tool._extra_allowed_dirs = None
+
+        if exec_tool := self.tools.get("exec"):
+            exec_tool.timeout = self.exec_config.timeout
+            exec_tool.working_dir = str(self.workspace)
+            exec_tool.restrict_to_workspace = self.restrict_to_workspace
+            exec_tool.path_append = self.exec_config.path_append
+
+        if web_search_tool := self.tools.get("web_search"):
+            web_search_tool._init_provider = self.web_search_provider
+            web_search_tool._init_api_key = self.brave_api_key
+            web_search_tool._init_base_url = self.web_search_base_url
+            web_search_tool.max_results = self.web_search_max_results
+            web_search_tool.proxy = self.web_proxy
+
+        if web_fetch_tool := self.tools.get("web_fetch"):
+            web_fetch_tool.proxy = self.web_proxy
+
+    def _apply_runtime_config(self, config) -> bool:
+        """Apply hot-reloadable config to the current agent instance."""
+        from nanobot.providers.base import GenerationSettings
+
+        defaults = config.agents.defaults
+        tools_cfg = config.tools
+        web_cfg = tools_cfg.web
+        search_cfg = web_cfg.search
+
+        self.model = defaults.model
+        self.max_iterations = defaults.max_tool_iterations
+        self.context_window_tokens = defaults.context_window_tokens
+        self.exec_config = tools_cfg.exec
+        self.restrict_to_workspace = tools_cfg.restrict_to_workspace
+        self.brave_api_key = search_cfg.api_key or None
+        self.web_proxy = web_cfg.proxy or None
+        self.web_search_provider = search_cfg.provider
+        self.web_search_base_url = search_cfg.base_url or None
+        self.web_search_max_results = search_cfg.max_results
+        self.channels_config = config.channels
+
+        self.provider.generation = GenerationSettings(
+            temperature=defaults.temperature,
+            max_tokens=defaults.max_tokens,
+            reasoning_effort=defaults.reasoning_effort,
+        )
+        if hasattr(self.provider, "default_model"):
+            self.provider.default_model = self.model
+        self.memory_consolidator.model = self.model
+        self.memory_consolidator.context_window_tokens = self.context_window_tokens
+        self.subagents.apply_runtime_config(
+            model=self.model,
+            brave_api_key=self.brave_api_key,
+            web_proxy=self.web_proxy,
+            web_search_provider=self.web_search_provider,
+            web_search_base_url=self.web_search_base_url,
+            web_search_max_results=self.web_search_max_results,
+            exec_config=self.exec_config,
+            restrict_to_workspace=self.restrict_to_workspace,
+        )
+        self._apply_runtime_tool_config()
+
+        mcp_changed = self._dump_mcp_servers(config.tools.mcp_servers) != self._dump_mcp_servers(
+            self._mcp_servers
+        )
+        self._mcp_servers = config.tools.mcp_servers
+        return mcp_changed
+
+    async def _reload_runtime_config_if_needed(self, *, force: bool = False) -> None:
+        """Reload hot-reloadable config from the active config file when it changes."""
+        if self.config_path is None:
+            return
+
+        try:
+            mtime_ns = self.config_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            mtime_ns = None
+
+        if not force and mtime_ns == self._runtime_config_mtime_ns:
+            return
+
+        self._runtime_config_mtime_ns = mtime_ns
+
+        from nanobot.config.loader import load_config
+
+        if mtime_ns is None:
+            await self._reset_mcp_connections()
+            self._mcp_servers = {}
+            return
+
+        reloaded = load_config(self.config_path)
+        if self._apply_runtime_config(reloaded):
+            await self._reset_mcp_connections()
+
+    async def _reload_mcp_servers_if_needed(self, *, force: bool = False) -> None:
+        """Backward-compatible wrapper for runtime config reloads."""
+        await self._reload_runtime_config_if_needed(force=force)
 
     @staticmethod
     def _decode_subprocess_output(data: bytes) -> str:
@@ -396,6 +537,8 @@ class AgentLoop:
                 content=self._mcp_usage(language),
             )
 
+        await self._reload_mcp_servers_if_needed()
+
         if not self._mcp_servers:
             return OutboundMessage(
                 channel=msg.channel,
@@ -456,6 +599,7 @@ class AgentLoop:
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
+        await self._reload_mcp_servers_if_needed()
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
         self._mcp_connecting = True
@@ -791,12 +935,7 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        if self._mcp_stack:
-            try:
-                await self._mcp_stack.aclose()
-            except (RuntimeError, BaseExceptionGroup):
-                pass  # MCP SDK cancel scope cleanup is noisy but harmless
-            self._mcp_stack = None
+        await self._reset_mcp_connections()
 
     def _schedule_background(self, coro) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
@@ -816,6 +955,8 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        await self._reload_runtime_config_if_needed()
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
@@ -825,6 +966,7 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             persona = self._get_session_persona(session)
             language = self._get_session_language(session)
+            await self._connect_mcp()
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
@@ -879,6 +1021,7 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(help_lines(language)),
             )
+        await self._connect_mcp()
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
