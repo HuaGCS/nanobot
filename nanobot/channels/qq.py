@@ -1,8 +1,12 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import os
+import secrets
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote, urljoin
 
 from loguru import logger
 
@@ -10,6 +14,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import QQConfig, QQInstanceConfig
+from nanobot.security.network import validate_url_target
+from nanobot.utils.helpers import detect_image_mime, ensure_dir
 
 try:
     import botpy
@@ -60,13 +66,225 @@ class QQChannel(BaseChannel):
     def default_config(cls) -> dict[str, object]:
         return QQConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: QQConfig | QQInstanceConfig, bus: MessageBus):
+    def __init__(
+        self,
+        config: QQConfig | QQInstanceConfig,
+        bus: MessageBus,
+        workspace: str | Path | None = None,
+    ):
         super().__init__(config, bus)
         self.config: QQConfig | QQInstanceConfig = config
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
         self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
         self._chat_type_cache: dict[str, str] = {}
+        self._workspace = Path(workspace).expanduser() if workspace is not None else None
+        self._cleanup_tasks: set[asyncio.Task[None]] = set()
+
+    @staticmethod
+    def _is_remote_media(path: str) -> bool:
+        """Return True when the outbound media reference is a remote URL."""
+        return path.startswith(("http://", "https://"))
+
+    @staticmethod
+    def _failed_media_notice(path: str, reason: str | None = None) -> str:
+        """Render a user-visible fallback notice for unsent QQ media."""
+        name = Path(path).name or path
+        return f"[Failed to send: {name}{f' - {reason}' if reason else ''}]"
+
+    def _workspace_root(self) -> Path:
+        """Return the active workspace root used by QQ publishing."""
+        return (self._workspace or Path.cwd()).resolve(strict=False)
+
+    def _public_root(self) -> Path:
+        """Return the fixed public tree served by the gateway HTTP route."""
+        return ensure_dir(self._workspace_root() / "public")
+
+    def _out_root(self) -> Path:
+        """Return the default workspace out directory used for generated artifacts."""
+        return self._workspace_root() / "out"
+
+    def _resolve_media_public_dir(self) -> tuple[Path | None, str | None]:
+        """Resolve the local publish directory for QQ media under workspace/public."""
+        configured = Path(self.config.media_public_dir).expanduser()
+        if configured.is_absolute():
+            resolved = configured.resolve(strict=False)
+        else:
+            resolved = (self._workspace_root() / configured).resolve(strict=False)
+        public_root = self._public_root()
+        try:
+            resolved.relative_to(public_root)
+        except ValueError:
+            return None, f"QQ mediaPublicDir must stay under {public_root}"
+        return ensure_dir(resolved), None
+
+    @staticmethod
+    def _guess_image_suffix(path: Path, mime_type: str | None) -> str:
+        """Pick a reasonable output suffix for published QQ images."""
+        if path.suffix:
+            return path.suffix.lower()
+        return {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/gif": ".gif",
+            "image/webp": ".webp",
+        }.get(mime_type or "", ".bin")
+
+    @staticmethod
+    def _is_image_file(path: Path) -> bool:
+        """Validate that a local file looks like an image supported by QQ rich media."""
+        try:
+            with path.open("rb") as f:
+                header = f.read(16)
+        except OSError:
+            return False
+        return detect_image_mime(header) is not None
+
+    @staticmethod
+    def _detect_image_mime(path: Path) -> str | None:
+        """Detect image mime type from the leading bytes of a file."""
+        try:
+            with path.open("rb") as f:
+                return detect_image_mime(f.read(16))
+        except OSError:
+            return None
+
+    async def _delete_published_media_later(self, path: Path, delay_seconds: int) -> None:
+        """Delete an auto-published QQ media file after a grace period."""
+        try:
+            await asyncio.sleep(delay_seconds)
+            path.unlink(missing_ok=True)
+        except Exception as e:
+            logger.debug("Failed to delete published QQ media {}: {}", path, e)
+
+    def _schedule_media_cleanup(self, path: Path) -> None:
+        """Best-effort cleanup for auto-published local QQ media."""
+        if self.config.media_ttl_seconds <= 0:
+            return
+        task = asyncio.create_task(
+            self._delete_published_media_later(path, self.config.media_ttl_seconds)
+        )
+        self._cleanup_tasks.add(task)
+        task.add_done_callback(self._cleanup_tasks.discard)
+
+    def _try_link_out_media_into_public(
+        self,
+        source: Path,
+        public_dir: Path,
+    ) -> tuple[Path | None, str | None]:
+        """Hard-link a generated workspace/out media file into public/qq."""
+        out_root = self._out_root().resolve(strict=False)
+        try:
+            source.relative_to(out_root)
+        except ValueError:
+            return None, f"QQ local media must stay under {public_dir} or {out_root}"
+
+        if not self._is_image_file(source):
+            return None, "QQ local media must be an image"
+
+        mime_type = self._detect_image_mime(source)
+        suffix = self._guess_image_suffix(source, mime_type)
+        published = public_dir / f"{source.stem}-{secrets.token_urlsafe(6)}{suffix}"
+        try:
+            os.link(source, published)
+        except OSError as e:
+            logger.warning("Failed to hard-link QQ media {} -> {}: {}", source, published, e)
+            return None, "failed to publish local file"
+        self._schedule_media_cleanup(published)
+        return published, None
+
+    async def _publish_local_media(self, media_path: str) -> tuple[str | None, str | None]:
+        """Map a local public QQ media file, or a generated out file, to its served URL."""
+        if not self.config.media_base_url:
+            return None, "QQ local media publishing is not configured"
+
+        source = Path(media_path).expanduser()
+        try:
+            resolved = source.resolve(strict=True)
+        except FileNotFoundError:
+            return None, "local file not found"
+        except OSError as e:
+            logger.warning("Failed to resolve QQ media path {}: {}", media_path, e)
+            return None, "local file unavailable"
+
+        if not resolved.is_file():
+            return None, "local file not found"
+
+        public_dir, dir_error = self._resolve_media_public_dir()
+        if public_dir is None:
+            return None, dir_error
+
+        try:
+            relative_path = resolved.relative_to(public_dir)
+        except ValueError:
+            published, publish_error = self._try_link_out_media_into_public(resolved, public_dir)
+            if published is None:
+                return None, publish_error
+            relative_path = published.relative_to(public_dir)
+
+        media_url = urljoin(
+            f"{self.config.media_base_url.rstrip('/')}/",
+            quote(relative_path.as_posix(), safe="/"),
+        )
+        return media_url, None
+
+    def _next_msg_seq(self) -> int:
+        """Return the next QQ message sequence number."""
+        self._msg_seq += 1
+        return self._msg_seq
+
+    async def _post_text_message(self, chat_id: str, msg_type: str, content: str, msg_id: str | None) -> None:
+        """Send a plain-text QQ message."""
+        payload = {
+            "msg_type": 0,
+            "content": content,
+            "msg_id": msg_id,
+            "msg_seq": self._next_msg_seq(),
+        }
+        if msg_type == "group":
+            await self._client.api.post_group_message(group_openid=chat_id, **payload)
+        else:
+            await self._client.api.post_c2c_message(openid=chat_id, **payload)
+
+    async def _post_remote_media_message(
+        self,
+        chat_id: str,
+        msg_type: str,
+        media_url: str,
+        content: str | None,
+        msg_id: str | None,
+    ) -> None:
+        """Send one QQ remote image URL as a rich-media message."""
+        if msg_type == "group":
+            media = await self._client.api.post_group_file(
+                group_openid=chat_id,
+                file_type=1,
+                url=media_url,
+                srv_send_msg=False,
+            )
+            await self._client.api.post_group_message(
+                group_openid=chat_id,
+                msg_type=7,
+                content=content,
+                media=media,
+                msg_id=msg_id,
+                msg_seq=self._next_msg_seq(),
+            )
+        else:
+            media = await self._client.api.post_c2c_file(
+                openid=chat_id,
+                file_type=1,
+                url=media_url,
+                srv_send_msg=False,
+            )
+            await self._client.api.post_c2c_message(
+                openid=chat_id,
+                msg_type=7,
+                content=content,
+                media=media,
+                msg_id=msg_id,
+                msg_seq=self._next_msg_seq(),
+            )
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -98,6 +316,9 @@ class QQChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the QQ bot."""
         self._running = False
+        for task in list(self._cleanup_tasks):
+            task.cancel()
+        self._cleanup_tasks.clear()
         if self._client:
             try:
                 await self._client.close()
@@ -113,24 +334,53 @@ class QQChannel(BaseChannel):
 
         try:
             msg_id = msg.metadata.get("message_id")
-            self._msg_seq += 1
             msg_type = self._chat_type_cache.get(msg.chat_id, "c2c")
-            if msg_type == "group":
-                await self._client.api.post_group_message(
-                    group_openid=msg.chat_id,
-                    msg_type=0,
-                    content=msg.content,
-                    msg_id=msg_id,
-                    msg_seq=self._msg_seq,
-                )
-            else:
-                await self._client.api.post_c2c_message(
-                    openid=msg.chat_id,
-                    msg_type=0,
-                    content=msg.content,
-                    msg_id=msg_id,
-                    msg_seq=self._msg_seq,
-                )
+            content_sent = False
+            fallback_lines: list[str] = []
+
+            for media_path in msg.media:
+                resolved_media = media_path
+                if not self._is_remote_media(media_path):
+                    resolved_media, publish_error = await self._publish_local_media(media_path)
+                    if not resolved_media:
+                        logger.warning(
+                            "QQ outbound local media could not be published: {} ({})",
+                            media_path,
+                            publish_error,
+                        )
+                        fallback_lines.append(
+                            self._failed_media_notice(media_path, publish_error)
+                        )
+                        continue
+
+                ok, error = validate_url_target(resolved_media)
+                if not ok:
+                    logger.warning("QQ outbound media blocked by URL validation: {}", error)
+                    fallback_lines.append(self._failed_media_notice(media_path, error))
+                    continue
+
+                try:
+                    await self._post_remote_media_message(
+                        msg.chat_id,
+                        msg_type,
+                        resolved_media,
+                        msg.content if msg.content and not content_sent else None,
+                        msg_id,
+                    )
+                    if msg.content and not content_sent:
+                        content_sent = True
+                except Exception as media_error:
+                    logger.error("Error sending QQ media {}: {}", resolved_media, media_error)
+                    fallback_lines.append(self._failed_media_notice(media_path))
+
+            text_parts: list[str] = []
+            if msg.content and not content_sent:
+                text_parts.append(msg.content)
+            if fallback_lines:
+                text_parts.extend(fallback_lines)
+
+            if text_parts:
+                await self._post_text_message(msg.chat_id, msg_type, "\n".join(text_parts), msg_id)
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
 

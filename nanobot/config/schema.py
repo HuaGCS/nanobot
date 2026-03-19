@@ -315,6 +315,9 @@ class QQConfig(Base):
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids
+    media_base_url: str = ""  # Public base URL used to expose local QQ media files
+    media_public_dir: str = "public/qq"  # Must stay under the active workspace/public tree
+    media_ttl_seconds: int = 600  # Delete published local QQ media after N seconds; <=0 keeps files
 
 
 class QQInstanceConfig(QQConfig):

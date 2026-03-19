@@ -699,11 +699,21 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "enabled": true,
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_OPENID"]
+      "allowFrom": ["YOUR_OPENID"],
+      "mediaBaseUrl": "https://bot.example.com/public/qq/",
+      "mediaPublicDir": "public/qq",
+      "mediaTtlSeconds": 600
     }
   }
 }
 ```
+
+`mediaBaseUrl` is optional, but it is required if you want nanobot to send local screenshots or
+other local image files through QQ. `mediaPublicDir` is resolved against the active startup
+workspace and must stay under `workspace/public`, because the built-in gateway HTTP server only
+serves that tree at `/public/`. nanobot accepts local QQ media from two places only: files already
+under `mediaPublicDir`, and generated image files under `workspace/out`, which nanobot will
+hard-link into `mediaPublicDir` automatically before sending.
 
 Multi-bot example:
 
@@ -738,6 +748,16 @@ nanobot gateway
 ```
 
 Now send a message to the bot from QQ — it should respond!
+
+Outbound QQ media always uses the QQ `url`-based rich-media API. Remote `http(s)` image URLs can be
+sent directly. Local image files can also be sent when `mediaBaseUrl` points to a public URL and
+`mediaPublicDir` matches a directory under `workspace/public`; nanobot maps that local public path
+to a URL and then sends that URL through QQ. The built-in gateway route exposes
+`workspace/public` as `/public/`, so a common setup is `mediaBaseUrl = https://your-host/public/qq/`.
+If you generate screenshots under `workspace/out`, nanobot will automatically create a hard link in
+`workspace/public/qq` first, then send that public URL. Files outside `mediaPublicDir` and
+`workspace/out` are rejected. Without that publishing config, local files still fall back to a text
+notice.
 
 </details>
 

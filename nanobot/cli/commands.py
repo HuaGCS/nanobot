@@ -495,6 +495,7 @@ def gateway(
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
+    from nanobot.gateway.http import GatewayHttpServer
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
@@ -581,6 +582,7 @@ def gateway(
 
     # Create channel manager
     channels = ChannelManager(config, bus)
+    http_server = GatewayHttpServer(config.workspace_path, config.gateway.host, port)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -638,6 +640,10 @@ def gateway(
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
+    console.print(
+        f"[green]✓[/green] Public files: {http_server.public_dir} -> /public/"
+    )
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
@@ -648,6 +654,7 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
+            await http_server.start()
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -659,6 +666,7 @@ def gateway(
             heartbeat.stop()
             cron.stop()
             agent.stop()
+            await http_server.stop()
             await channels.stop_all()
 
     asyncio.run(run())
