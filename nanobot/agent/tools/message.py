@@ -42,7 +42,11 @@ class MessageTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
+        return (
+            "Send a message to the user. Use this when you want to communicate something. "
+            "If you generate local files for delivery first, save them under workspace/out; "
+            "QQ can auto-publish local images from workspace/out."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -64,7 +68,10 @@ class MessageTool(Tool):
                 "media": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)"
+                    "description": (
+                        "Optional: list of file paths or remote URLs to attach. "
+                        "Generated local files should be written under workspace/out first."
+                    ),
                 }
             },
             "required": ["content"]

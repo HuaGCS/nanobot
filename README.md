@@ -759,6 +759,10 @@ If you generate screenshots under `workspace/out`, nanobot will automatically cr
 `workspace/out` are rejected. Without that publishing config, local files still fall back to a text
 notice.
 
+When an agent uses shell/browser tools to create screenshots or other temporary files for delivery,
+it should write them under `workspace/out` instead of the workspace root so channel publishing rules
+can apply consistently.
+
 </details>
 
 <details>
