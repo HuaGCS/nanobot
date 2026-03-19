@@ -1360,6 +1360,7 @@ These commands are available inside chats handled by `nanobot agent` or `nanobot
 | `/skill uninstall <slug>` | Remove a ClawHub-managed skill from the active workspace |
 | `/skill list` | List ClawHub-managed skills in the active workspace |
 | `/skill update` | Update all ClawHub-managed skills in the active workspace |
+| `/mcp [list]` | List configured MCP servers and registered MCP tools |
 | `/stop` | Stop the current task |
 | `/restart` | Restart the bot process |
 | `/help` | Show command help |

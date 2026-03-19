@@ -191,6 +191,27 @@ class AgentLoop:
             text(language, "cmd_lang_set"),
         ])
 
+    def _mcp_usage(self, language: str) -> str:
+        """Return MCP command help text."""
+        return text(language, "mcp_usage")
+
+    def _group_mcp_tool_names(self) -> dict[str, list[str]]:
+        """Group registered MCP tool names by configured server name."""
+        grouped = {name: [] for name in self._mcp_servers}
+        server_names = sorted(self._mcp_servers, key=len, reverse=True)
+
+        for tool_name in self.tools.tool_names:
+            if not tool_name.startswith("mcp_"):
+                continue
+
+            for server_name in server_names:
+                prefix = f"mcp_{server_name}_"
+                if tool_name.startswith(prefix):
+                    grouped[server_name].append(tool_name.removeprefix(prefix))
+                    break
+
+        return {name: sorted(tools) for name, tools in grouped.items()}
+
     @staticmethod
     def _decode_subprocess_output(data: bytes) -> str:
         """Decode subprocess output conservatively for CLI surfacing."""
@@ -362,6 +383,48 @@ class AgentLoop:
             notes.append(text(language, "skill_applied_to_workspace", workspace=workspace))
         content = "\n\n".join(notes) if notes else text(language, "skill_command_completed", command=subcommand)
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+
+    async def _handle_mcp_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        """Handle MCP inspection commands."""
+        language = self._get_session_language(session)
+        parts = msg.content.strip().split()
+
+        if len(parts) > 1 and parts[1].lower() != "list":
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=self._mcp_usage(language),
+            )
+
+        if not self._mcp_servers:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=text(language, "mcp_no_servers"),
+            )
+
+        await self._connect_mcp()
+
+        server_lines = "\n".join(f"- {name}" for name in self._mcp_servers)
+        sections = [text(language, "mcp_servers_list", items=server_lines)]
+
+        grouped_tools = self._group_mcp_tool_names()
+        tool_lines = "\n".join(
+            f"- {server}: {', '.join(tools)}"
+            for server, tools in grouped_tools.items()
+            if tools
+        )
+        sections.append(
+            text(language, "mcp_tools_list", items=tool_lines)
+            if tool_lines
+            else text(language, "mcp_no_tools")
+        )
+
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="\n\n".join(sections),
+        )
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -810,6 +873,8 @@ class AgentLoop:
             return await self._handle_persona_command(msg, session)
         if cmd == "/skill":
             return await self._handle_skill_command(msg, session)
+        if cmd == "/mcp":
+            return await self._handle_mcp_command(msg, session)
         if cmd == "/help":
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(help_lines(language)),

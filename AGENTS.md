@@ -31,6 +31,7 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - When a slash command changes user-visible wording, update both `nanobot/locales/en.json` and `nanobot/locales/zh.json`.
 - If a slash command should appear in Telegram's native command menu, also update `nanobot/channels/telegram.py`.
 - `/skill` currently supports `search`, `install`, `uninstall`, `list`, and `update`. Keep subcommand dispatch in `nanobot/agent/loop.py`.
+- `/mcp` supports the default `list` behavior (and explicit `/mcp list`) to show configured MCP servers and registered MCP tools.
 - `/skill` shells out to `npx clawhub@latest`; it requires Node.js/`npx` at runtime.
 - `/skill uninstall` runs in a non-interactive context, so keep passing `--yes` when shelling out to ClawHub.
 - Treat empty `/skill search` output as a user-visible "no results" case rather than a silent success. Surface npm/registry failures directly to the user.

@@ -165,7 +165,7 @@ class TelegramChannel(BaseChannel):
     name = "telegram"
     display_name = "Telegram"
 
-    COMMAND_NAMES = ("start", "new", "lang", "persona", "skill", "stop", "help", "restart")
+    COMMAND_NAMES = ("start", "new", "lang", "persona", "skill", "mcp", "stop", "help", "restart")
 
     @classmethod
     def default_config(cls) -> dict[str, object]:
@@ -239,6 +239,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("lang", self._forward_command))
         self._app.add_handler(CommandHandler("persona", self._forward_command))
         self._app.add_handler(CommandHandler("skill", self._forward_command))
+        self._app.add_handler(CommandHandler("mcp", self._forward_command))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))

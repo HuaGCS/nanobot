@@ -1,5 +1,3 @@
-import asyncio
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -204,6 +202,13 @@ def test_is_allowed_rejects_invalid_legacy_telegram_sender_shapes() -> None:
 
     assert channel.is_allowed("attacker|alice|extra") is False
     assert channel.is_allowed("not-a-number|alice") is False
+
+
+def test_build_bot_commands_includes_mcp() -> None:
+    commands = TelegramChannel._build_bot_commands("en")
+    descriptions = {command.command: command.description for command in commands}
+
+    assert descriptions["mcp"] == "List MCP servers and tools"
 
 
 @pytest.mark.asyncio

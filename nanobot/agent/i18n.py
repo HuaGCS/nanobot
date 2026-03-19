@@ -81,6 +81,7 @@ def help_lines(language: Any) -> list[str]:
         text(active, "cmd_persona_list"),
         text(active, "cmd_persona_set"),
         text(active, "cmd_skill"),
+        text(active, "cmd_mcp"),
         text(active, "cmd_stop"),
         text(active, "cmd_restart"),
         text(active, "cmd_help"),
