@@ -1,9 +1,10 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
 import nanobot.agent.memory as memory_module
+from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 
@@ -188,3 +189,36 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     assert "consolidate" in order
     assert "llm" in order
     assert order.index("consolidate") < order.index("llm")
+
+
+@pytest.mark.asyncio
+async def test_slow_preflight_consolidation_continues_in_background(tmp_path, monkeypatch) -> None:
+    order: list[str] = []
+
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    monkeypatch.setattr(loop, "_PREFLIGHT_CONSOLIDATION_BUDGET_SECONDS", 0.01)
+
+    release = asyncio.Event()
+
+    async def slow_consolidation(_session):
+        order.append("consolidate-start")
+        await release.wait()
+        order.append("consolidate-end")
+
+    async def track_llm(*args, **kwargs):
+        order.append("llm")
+        return LLMResponse(content="ok", tool_calls=[])
+
+    loop.memory_consolidator.maybe_consolidate_by_tokens = slow_consolidation  # type: ignore[method-assign]
+    loop.provider.chat_with_retry = track_llm
+
+    await loop.process_direct("hello", session_key="cli:test")
+
+    assert "consolidate-start" in order
+    assert "llm" in order
+    assert "consolidate-end" not in order
+
+    release.set()
+    await loop.close_mcp()
+
+    assert "consolidate-end" in order

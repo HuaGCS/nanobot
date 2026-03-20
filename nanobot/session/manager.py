@@ -31,6 +31,9 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    _persisted_message_count: int = field(default=0, init=False, repr=False)
+    _persisted_metadata_state: str = field(default="", init=False, repr=False)
+    _requires_full_save: bool = field(default=False, init=False, repr=False)
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -97,6 +100,7 @@ class Session:
         self.messages = []
         self.last_consolidated = 0
         self.updated_at = datetime.now()
+        self._requires_full_save = True
 
 
 class SessionManager:
@@ -178,33 +182,87 @@ class SessionManager:
                     else:
                         messages.append(data)
 
-            return Session(
+            session = Session(
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
+                updated_at=datetime.fromtimestamp(path.stat().st_mtime),
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )
+            self._mark_persisted(session)
+            return session
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
             return None
 
+    @staticmethod
+    def _metadata_state(session: Session) -> str:
+        """Serialize metadata fields that require a checkpoint line."""
+        return json.dumps(
+            {
+                "key": session.key,
+                "created_at": session.created_at.isoformat(),
+                "metadata": session.metadata,
+                "last_consolidated": session.last_consolidated,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+    @staticmethod
+    def _metadata_line(session: Session) -> dict[str, Any]:
+        """Build a metadata checkpoint record."""
+        return {
+            "_type": "metadata",
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "last_consolidated": session.last_consolidated
+        }
+
+    @staticmethod
+    def _write_jsonl_line(handle: Any, payload: dict[str, Any]) -> None:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    def _mark_persisted(self, session: Session) -> None:
+        session._persisted_message_count = len(session.messages)
+        session._persisted_metadata_state = self._metadata_state(session)
+        session._requires_full_save = False
+
+    def _rewrite_session_file(self, path: Path, session: Session) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            self._write_jsonl_line(f, self._metadata_line(session))
+            for msg in session.messages:
+                self._write_jsonl_line(f, msg)
+        self._mark_persisted(session)
+
     def save(self, session: Session) -> None:
         """Save a session to disk."""
         path = self._get_session_path(session.key)
+        metadata_state = self._metadata_state(session)
+        needs_full_rewrite = (
+            session._requires_full_save
+            or not path.exists()
+            or session._persisted_message_count > len(session.messages)
+        )
 
-        with open(path, "w", encoding="utf-8") as f:
-            metadata_line = {
-                "_type": "metadata",
-                "key": session.key,
-                "created_at": session.created_at.isoformat(),
-                "updated_at": session.updated_at.isoformat(),
-                "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
-            }
-            f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-            for msg in session.messages:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        if needs_full_rewrite:
+            session.updated_at = datetime.now()
+            self._rewrite_session_file(path, session)
+        else:
+            new_messages = session.messages[session._persisted_message_count:]
+            metadata_changed = metadata_state != session._persisted_metadata_state
+
+            if new_messages or metadata_changed:
+                session.updated_at = datetime.now()
+                with open(path, "a", encoding="utf-8") as f:
+                    for msg in new_messages:
+                        self._write_jsonl_line(f, msg)
+                    if metadata_changed:
+                        self._write_jsonl_line(f, self._metadata_line(session))
+                self._mark_persisted(session)
 
         self._cache[session.key] = session
 
@@ -223,19 +281,24 @@ class SessionManager:
 
         for path in self.sessions_dir.glob("*.jsonl"):
             try:
-                # Read just the metadata line
+                created_at = None
+                key = path.stem.replace("_", ":", 1)
                 with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
-                            key = data.get("key") or path.stem.replace("_", ":", 1)
-                            sessions.append({
-                                "key": key,
-                                "created_at": data.get("created_at"),
-                                "updated_at": data.get("updated_at"),
-                                "path": str(path)
-                            })
+                            key = data.get("key") or key
+                            created_at = data.get("created_at")
+
+                # Incremental saves append messages without rewriting the first metadata line,
+                # so use file mtime as the session's latest activity timestamp.
+                sessions.append({
+                    "key": key,
+                    "created_at": created_at,
+                    "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+                    "path": str(path)
+                })
             except Exception:
                 continue
 

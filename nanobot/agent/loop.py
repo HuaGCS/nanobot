@@ -71,6 +71,7 @@ class AgentLoop:
         "registry.npmjs.org",
     )
     _CLAWHUB_NPM_CACHE_DIR = Path(tempfile.gettempdir()) / "nanobot-npm-cache"
+    _PREFLIGHT_CONSOLIDATION_BUDGET_SECONDS = 1.5
 
     def __init__(
         self,
@@ -137,7 +138,8 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._background_tasks: list[asyncio.Task] = []
+        self._background_tasks: set[asyncio.Task] = set()
+        self._token_consolidation_tasks: dict[str, asyncio.Task[None]] = {}
         self._processing_lock = asyncio.Lock()
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
@@ -933,15 +935,55 @@ class AgentLoop:
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
         if self._background_tasks:
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            await asyncio.gather(*list(self._background_tasks), return_exceptions=True)
             self._background_tasks.clear()
+        self._token_consolidation_tasks.clear()
         await self._reset_mcp_connections()
 
-    def _schedule_background(self, coro) -> None:
+    def _track_background_task(self, task: asyncio.Task) -> asyncio.Task:
+        """Track a background task until completion."""
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    def _schedule_background(self, coro) -> asyncio.Task:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
         task = asyncio.create_task(coro)
-        self._background_tasks.append(task)
-        task.add_done_callback(self._background_tasks.remove)
+        return self._track_background_task(task)
+
+    def _ensure_background_token_consolidation(self, session: Session) -> asyncio.Task[None]:
+        """Ensure at most one token-consolidation task runs per session."""
+        existing = self._token_consolidation_tasks.get(session.key)
+        if existing and not existing.done():
+            return existing
+
+        task = asyncio.create_task(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        self._token_consolidation_tasks[session.key] = task
+        self._track_background_task(task)
+
+        def _cleanup(done: asyncio.Task[None]) -> None:
+            if self._token_consolidation_tasks.get(session.key) is done:
+                self._token_consolidation_tasks.pop(session.key, None)
+
+        task.add_done_callback(_cleanup)
+        return task
+
+    async def _run_preflight_token_consolidation(self, session: Session) -> None:
+        """Give token consolidation a short head start, then continue in background if needed."""
+        task = self._ensure_background_token_consolidation(session)
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=self._PREFLIGHT_CONSOLIDATION_BUDGET_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Token consolidation still running for {} after {:.1f}s; continuing in background",
+                session.key,
+                self._PREFLIGHT_CONSOLIDATION_BUDGET_SECONDS,
+            )
+        except Exception:
+            logger.exception("Preflight token consolidation failed for {}", session.key)
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -967,7 +1009,7 @@ class AgentLoop:
             persona = self._get_session_persona(session)
             language = self._get_session_language(session)
             await self._connect_mcp()
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            await self._run_preflight_token_consolidation(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             # Subagent results should be assistant role, other system messages use user role
@@ -984,7 +1026,7 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            self._ensure_background_token_consolidation(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -1022,7 +1064,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(help_lines(language)),
             )
         await self._connect_mcp()
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        await self._run_preflight_token_consolidation(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
@@ -1057,7 +1099,7 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        self._ensure_background_token_consolidation(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
