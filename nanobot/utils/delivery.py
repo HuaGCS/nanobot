@@ -28,11 +28,9 @@ def is_image_file(path: Path) -> bool:
 def resolve_delivery_media(
     media_path: str | Path,
     workspace: Path,
-    media_base_url: str,
+    media_base_url: str = "",
 ) -> tuple[Path | None, str | None, str | None]:
-    """Resolve a local delivery artifact to a public URL under media_base_url."""
-    if not media_base_url:
-        return None, None, "local media publishing is not configured"
+    """Resolve a local delivery artifact and optionally map it to a public URL."""
 
     source = Path(media_path).expanduser()
     try:
@@ -54,6 +52,9 @@ def resolve_delivery_media(
 
     if not is_image_file(resolved):
         return None, None, "local delivery media must be an image"
+
+    if not media_base_url:
+        return resolved, None, None
 
     media_url = urljoin(
         f"{media_base_url.rstrip('/')}/",

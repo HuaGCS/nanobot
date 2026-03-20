@@ -706,11 +706,10 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 }
 ```
 
-`mediaBaseUrl` is optional, but it is required if you want nanobot to send local screenshots or
-other local image files through QQ. nanobot does not serve local files over HTTP, so
-`mediaBaseUrl` must point to your own static file server. Generated delivery artifacts should be
-written under `workspace/out`, and `mediaBaseUrl` should expose that directory with matching
-relative paths.
+`mediaBaseUrl` is optional. For local QQ images, nanobot will first try direct `file_data` upload
+from generated delivery artifacts under `workspace/out`. Configuring `mediaBaseUrl` is still
+recommended, because nanobot can then map those files onto your own static file server and fall
+back to the URL-based rich-media flow when needed.
 
 Multi-bot example:
 
@@ -747,14 +746,11 @@ nanobot gateway
 Now send a message to the bot from QQ — it should respond!
 
 Outbound QQ media sends remote `http(s)` images through the QQ rich-media `url` flow directly.
-For local image files, nanobot first publishes or maps the file to a public URL, then tries the
-documented `file_data` upload path together with that URL; if the installed QQ SDK/runtime path
-does not accept that upload, nanobot falls back to the existing URL-only rich-media flow.
-nanobot does not serve local files itself, so `mediaBaseUrl` must point to your own HTTP server
-that exposes generated delivery artifacts. Tools and skills should write deliverable files under
-`workspace/out`; QQ maps local image paths from that directory onto `mediaBaseUrl` using the same
-relative path. Files outside `workspace/out` are rejected. Without that publishing config, local
-files still fall back to a text notice.
+For local image files, nanobot always tries `file_data` upload first. When `mediaBaseUrl` is
+configured, nanobot also maps the same local file onto that public URL and can fall back to the
+existing URL-only rich-media flow if direct upload fails. Without `mediaBaseUrl`, nanobot still
+attempts direct upload, but there is no URL fallback path. Tools and skills should write
+deliverable files under `workspace/out`; QQ accepts only local image files from that directory.
 
 When an agent uses shell/browser tools to create screenshots or other temporary files for delivery,
 it should write them under `workspace/out` instead of the workspace root so channel publishing rules

@@ -5,7 +5,7 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.qq import QQChannel
+from nanobot.channels.qq import QQChannel, _make_bot_class
 from nanobot.config.schema import QQConfig
 
 
@@ -52,6 +52,23 @@ class _FakeApi:
 class _FakeClient:
     def __init__(self) -> None:
         self.api = _FakeApi()
+
+
+def test_make_bot_class_uses_longer_http_timeout(monkeypatch) -> None:
+    if not hasattr(__import__("nanobot.channels.qq", fromlist=["botpy"]).botpy, "Client"):
+        pytest.skip("botpy not installed")
+
+    captured: dict[str, object] = {}
+
+    def fake_init(self, *args, **kwargs) -> None:  # noqa: ARG001
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr("nanobot.channels.qq.botpy.Client.__init__", fake_init)
+    bot_cls = _make_bot_class(SimpleNamespace(_on_message=None))
+    bot_cls()
+
+    assert captured["kwargs"]["timeout"] == 20
+    assert captured["kwargs"]["ext_handlers"] is False
 
 
 @pytest.mark.asyncio
@@ -164,8 +181,21 @@ async def test_send_group_remote_media_url_uses_file_api_then_media_message(monk
 
 
 @pytest.mark.asyncio
-async def test_send_local_media_falls_back_to_text_notice_when_publishing_not_configured() -> None:
-    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
+async def test_send_local_media_without_media_base_url_uses_file_data_only(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    out_dir = workspace / "out"
+    out_dir.mkdir()
+    source = out_dir / "demo.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nfake-png")
+
+    channel = QQChannel(
+        QQConfig(app_id="app", secret="secret", allow_from=["*"]),
+        MessageBus(),
+        workspace=workspace,
+    )
     channel._client = _FakeClient()
 
     await channel.send(
@@ -173,18 +203,31 @@ async def test_send_local_media_falls_back_to_text_notice_when_publishing_not_co
             channel="qq",
             chat_id="user123",
             content="hello",
-            media=["/tmp/demo.png"],
+            media=[str(source)],
             metadata={"message_id": "msg1"},
         )
     )
 
     assert channel._client.api.c2c_file_calls == []
     assert channel._client.api.group_file_calls == []
+    assert channel._client.api.raw_file_upload_calls == [
+        {
+            "method": "POST",
+            "path": "/v2/users/{openid}/files",
+            "params": {"openid": "user123"},
+            "json": {
+                "file_type": 1,
+                "file_data": b64encode(b"\x89PNG\r\n\x1a\nfake-png").decode("ascii"),
+                "srv_send_msg": False,
+            },
+        }
+    ]
     assert channel._client.api.c2c_calls == [
         {
             "openid": "user123",
-            "msg_type": 0,
-            "content": "hello\n[Failed to send: demo.png - local media publishing is not configured]",
+            "msg_type": 7,
+            "content": "hello",
+            "media": {"file_info": "c2c-file-info", "file_uuid": "c2c-file", "ttl": 60},
             "msg_id": "msg1",
             "msg_seq": 2,
         }
@@ -414,6 +457,47 @@ async def test_send_local_media_falls_back_to_url_only_upload_when_file_data_upl
             "msg_type": 7,
             "content": "hello",
             "media": {"file_info": "c2c-file-info", "file_uuid": "c2c-file", "ttl": 60},
+            "msg_id": "msg1",
+            "msg_seq": 2,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_local_media_without_media_base_url_falls_back_to_text_notice_when_file_data_upload_fails(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    out_dir = workspace / "out"
+    out_dir.mkdir()
+    source = out_dir / "demo.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nfake-png")
+
+    channel = QQChannel(
+        QQConfig(app_id="app", secret="secret", allow_from=["*"]),
+        MessageBus(),
+        workspace=workspace,
+    )
+    channel._client = _FakeClient()
+    channel._client.api.raise_on_raw_file_upload = True
+
+    await channel.send(
+        OutboundMessage(
+            channel="qq",
+            chat_id="user123",
+            content="hello",
+            media=[str(source)],
+            metadata={"message_id": "msg1"},
+        )
+    )
+
+    assert channel._client.api.c2c_file_calls == []
+    assert channel._client.api.c2c_calls == [
+        {
+            "openid": "user123",
+            "msg_type": 0,
+            "content": "hello\n[Failed to send: demo.png - QQ local file_data upload failed]",
             "msg_id": "msg1",
             "msg_seq": 2,
         }
