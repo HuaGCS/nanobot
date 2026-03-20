@@ -1,4 +1,3 @@
-import os
 from base64 import b64encode
 from types import SimpleNamespace
 
@@ -185,7 +184,7 @@ async def test_send_local_media_falls_back_to_text_notice_when_publishing_not_co
         {
             "openid": "user123",
             "msg_type": 0,
-            "content": "hello\n[Failed to send: demo.png - QQ local media publishing is not configured]",
+            "content": "hello\n[Failed to send: demo.png - local media publishing is not configured]",
             "msg_id": "msg1",
             "msg_seq": 2,
         }
@@ -193,70 +192,7 @@ async def test_send_local_media_falls_back_to_text_notice_when_publishing_not_co
 
 
 @pytest.mark.asyncio
-async def test_send_local_media_under_public_dir_uses_c2c_file_api(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    public_dir = workspace / "public" / "qq"
-    public_dir.mkdir(parents=True)
-    source = public_dir / "demo.png"
-    source.write_bytes(b"fake-png")
-
-    channel = QQChannel(
-        QQConfig(
-            app_id="app",
-            secret="secret",
-            allow_from=["*"],
-            media_base_url="https://files.example.com/public/qq",
-            media_public_dir="public/qq",
-            media_ttl_seconds=0,
-        ),
-        MessageBus(),
-        workspace=workspace,
-    )
-    channel._client = _FakeClient()
-    monkeypatch.setattr("nanobot.channels.qq.validate_url_target", lambda url: (True, ""))
-
-    await channel.send(
-        OutboundMessage(
-            channel="qq",
-            chat_id="user123",
-            content="hello",
-            media=[str(source)],
-            metadata={"message_id": "msg1"},
-        )
-    )
-
-    assert channel._client.api.raw_file_upload_calls == [
-        {
-            "method": "POST",
-            "path": "/v2/users/{openid}/files",
-            "params": {"openid": "user123"},
-            "json": {
-                "file_type": 1,
-                "url": "https://files.example.com/public/qq/demo.png",
-                "file_data": b64encode(b"fake-png").decode("ascii"),
-                "srv_send_msg": False,
-            },
-        }
-    ]
-    assert channel._client.api.c2c_file_calls == []
-    assert channel._client.api.c2c_calls == [
-        {
-            "openid": "user123",
-            "msg_type": 7,
-            "content": "hello",
-            "media": {"file_info": "c2c-file-info", "file_uuid": "c2c-file", "ttl": 60},
-            "msg_id": "msg1",
-            "msg_seq": 2,
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_send_local_media_from_out_auto_links_into_public_then_uses_c2c_file_api(
+async def test_send_local_media_under_out_dir_uses_c2c_file_api(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -264,7 +200,7 @@ async def test_send_local_media_from_out_auto_links_into_public_then_uses_c2c_fi
     workspace.mkdir()
     out_dir = workspace / "out"
     out_dir.mkdir()
-    source = out_dir / "outside.png"
+    source = out_dir / "demo.png"
     source.write_bytes(b"\x89PNG\r\n\x1a\nfake-png")
 
     channel = QQChannel(
@@ -272,9 +208,7 @@ async def test_send_local_media_from_out_auto_links_into_public_then_uses_c2c_fi
             app_id="app",
             secret="secret",
             allow_from=["*"],
-            media_base_url="https://files.example.com/public/qq",
-            media_public_dir="public/qq",
-            media_ttl_seconds=0,
+            media_base_url="https://files.example.com/out",
         ),
         MessageBus(),
         workspace=workspace,
@@ -292,11 +226,6 @@ async def test_send_local_media_from_out_auto_links_into_public_then_uses_c2c_fi
         )
     )
 
-    published = list((workspace / "public" / "qq").iterdir())
-    assert len(published) == 1
-    assert published[0].name.startswith("outside-")
-    assert published[0].suffix == ".png"
-    assert os.stat(source).st_ino == os.stat(published[0]).st_ino
     assert channel._client.api.raw_file_upload_calls == [
         {
             "method": "POST",
@@ -304,7 +233,7 @@ async def test_send_local_media_from_out_auto_links_into_public_then_uses_c2c_fi
             "params": {"openid": "user123"},
             "json": {
                 "file_type": 1,
-                "url": f"https://files.example.com/public/qq/{published[0].name}",
+                "url": "https://files.example.com/out/demo.png",
                 "file_data": b64encode(b"\x89PNG\r\n\x1a\nfake-png").decode("ascii"),
                 "srv_send_msg": False,
             },
@@ -324,7 +253,69 @@ async def test_send_local_media_from_out_auto_links_into_public_then_uses_c2c_fi
 
 
 @pytest.mark.asyncio
-async def test_send_local_media_outside_public_and_out_falls_back_to_text_notice(
+async def test_send_local_media_in_nested_out_path_uses_relative_url(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    out_dir = workspace / "out"
+    source_dir = out_dir / "shots"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "github.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nfake-png")
+
+    channel = QQChannel(
+        QQConfig(
+            app_id="app",
+            secret="secret",
+            allow_from=["*"],
+            media_base_url="https://files.example.com/qq-media",
+        ),
+        MessageBus(),
+        workspace=workspace,
+    )
+    channel._client = _FakeClient()
+    monkeypatch.setattr("nanobot.channels.qq.validate_url_target", lambda url: (True, ""))
+
+    await channel.send(
+        OutboundMessage(
+            channel="qq",
+            chat_id="user123",
+            content="hello",
+            media=[str(source)],
+            metadata={"message_id": "msg1"},
+        )
+    )
+
+    assert channel._client.api.raw_file_upload_calls == [
+        {
+            "method": "POST",
+            "path": "/v2/users/{openid}/files",
+            "params": {"openid": "user123"},
+            "json": {
+                "file_type": 1,
+                "url": "https://files.example.com/qq-media/shots/github.png",
+                "file_data": b64encode(b"\x89PNG\r\n\x1a\nfake-png").decode("ascii"),
+                "srv_send_msg": False,
+            },
+        }
+    ]
+    assert channel._client.api.c2c_file_calls == []
+    assert channel._client.api.c2c_calls == [
+        {
+            "openid": "user123",
+            "msg_type": 7,
+            "content": "hello",
+            "media": {"file_info": "c2c-file-info", "file_uuid": "c2c-file", "ttl": 60},
+            "msg_id": "msg1",
+            "msg_seq": 2,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_local_media_outside_out_falls_back_to_text_notice(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -340,9 +331,7 @@ async def test_send_local_media_outside_public_and_out_falls_back_to_text_notice
             app_id="app",
             secret="secret",
             allow_from=["*"],
-            media_base_url="https://files.example.com/public/qq",
-            media_public_dir="public/qq",
-            media_ttl_seconds=0,
+            media_base_url="https://files.example.com/out",
         ),
         MessageBus(),
         workspace=workspace,
@@ -365,8 +354,10 @@ async def test_send_local_media_outside_public_and_out_falls_back_to_text_notice
         {
             "openid": "user123",
             "msg_type": 0,
-            "content": "hello\n[Failed to send: outside.png - QQ local media must stay under "
-            f"{workspace / 'public' / 'qq'} or {workspace / 'out'}]",
+            "content": (
+                "hello\n[Failed to send: outside.png - local delivery media must stay under "
+                f"{workspace / 'out'}]"
+            ),
             "msg_id": "msg1",
             "msg_seq": 2,
         }
@@ -380,19 +371,17 @@ async def test_send_local_media_falls_back_to_url_only_upload_when_file_data_upl
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    public_dir = workspace / "public" / "qq"
-    public_dir.mkdir(parents=True)
-    source = public_dir / "demo.png"
-    source.write_bytes(b"fake-png")
+    out_dir = workspace / "out"
+    out_dir.mkdir()
+    source = out_dir / "demo.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nfake-png")
 
     channel = QQChannel(
         QQConfig(
             app_id="app",
             secret="secret",
             allow_from=["*"],
-            media_base_url="https://files.example.com/public/qq",
-            media_public_dir="public/qq",
-            media_ttl_seconds=0,
+            media_base_url="https://files.example.com/out",
         ),
         MessageBus(),
         workspace=workspace,
@@ -415,7 +404,7 @@ async def test_send_local_media_falls_back_to_url_only_upload_when_file_data_upl
         {
             "openid": "user123",
             "file_type": 1,
-            "url": "https://files.example.com/public/qq/demo.png",
+            "url": "https://files.example.com/out/demo.png",
             "srv_send_msg": False,
         }
     ]
@@ -432,17 +421,17 @@ async def test_send_local_media_falls_back_to_url_only_upload_when_file_data_upl
 
 
 @pytest.mark.asyncio
-async def test_send_local_media_symlink_to_outside_public_dir_is_rejected(
+async def test_send_local_media_symlink_to_outside_out_dir_is_rejected(
     monkeypatch,
     tmp_path,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    public_dir = workspace / "public" / "qq"
-    public_dir.mkdir(parents=True)
+    out_dir = workspace / "out"
+    out_dir.mkdir()
     outside = tmp_path / "secret.png"
     outside.write_bytes(b"secret")
-    source = public_dir / "linked.png"
+    source = out_dir / "linked.png"
     source.symlink_to(outside)
 
     channel = QQChannel(
@@ -450,9 +439,7 @@ async def test_send_local_media_symlink_to_outside_public_dir_is_rejected(
             app_id="app",
             secret="secret",
             allow_from=["*"],
-            media_base_url="https://files.example.com/public/qq",
-            media_public_dir="public/qq",
-            media_ttl_seconds=0,
+            media_base_url="https://files.example.com/out",
         ),
         MessageBus(),
         workspace=workspace,
@@ -475,8 +462,10 @@ async def test_send_local_media_symlink_to_outside_public_dir_is_rejected(
         {
             "openid": "user123",
             "msg_type": 0,
-            "content": "hello\n[Failed to send: linked.png - QQ local media must stay under "
-            f"{workspace / 'public' / 'qq'} or {workspace / 'out'}]",
+            "content": (
+                "hello\n[Failed to send: linked.png - local delivery media must stay under "
+                f"{workspace / 'out'}]"
+            ),
             "msg_id": "msg1",
             "msg_seq": 2,
         }
@@ -500,9 +489,7 @@ async def test_send_non_image_media_from_out_falls_back_to_text_notice(
             app_id="app",
             secret="secret",
             allow_from=["*"],
-            media_base_url="https://files.example.com/public/qq",
-            media_public_dir="public/qq",
-            media_ttl_seconds=0,
+            media_base_url="https://files.example.com/out",
         ),
         MessageBus(),
         workspace=workspace,
@@ -525,7 +512,7 @@ async def test_send_non_image_media_from_out_falls_back_to_text_notice(
         {
             "openid": "user123",
             "msg_type": 0,
-            "content": "hello\n[Failed to send: note.txt - QQ local media must be an image]",
+            "content": "hello\n[Failed to send: note.txt - local delivery media must be an image]",
             "msg_id": "msg1",
             "msg_seq": 2,
         }

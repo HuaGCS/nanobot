@@ -54,7 +54,8 @@ def test_system_prompt_mentions_workspace_out_for_generated_artifacts(tmp_path) 
     prompt = builder.build_system_prompt()
 
     assert f"Put generated artifacts meant for delivery to the user under: {workspace}/out" in prompt
-    assert f"For QQ delivery, local images under `{workspace}/out` can be auto-published" in prompt
+    assert "Channels that need public URLs for local delivery artifacts expect files under " in prompt
+    assert "`mediaBaseUrl` at your own static file server for that directory." in prompt
 
 
 def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:

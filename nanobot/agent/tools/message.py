@@ -44,8 +44,7 @@ class MessageTool(Tool):
     def description(self) -> str:
         return (
             "Send a message to the user. Use this when you want to communicate something. "
-            "If you generate local files for delivery first, save them under workspace/out; "
-            "QQ can auto-publish local images from workspace/out."
+            "If you generate local files for delivery first, save them under workspace/out."
         )
 
     @property

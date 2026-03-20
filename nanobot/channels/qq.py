@@ -2,12 +2,9 @@
 
 import asyncio
 import base64
-import os
-import secrets
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import quote, urljoin
 
 from loguru import logger
 
@@ -16,7 +13,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import QQConfig, QQInstanceConfig
 from nanobot.security.network import validate_url_target
-from nanobot.utils.helpers import detect_image_mime, ensure_dir
+from nanobot.utils.delivery import resolve_delivery_media
 
 try:
     import botpy
@@ -83,7 +80,6 @@ class QQChannel(BaseChannel):
         self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
         self._chat_type_cache: dict[str, str] = {}
         self._workspace = Path(workspace).expanduser() if workspace is not None else None
-        self._cleanup_tasks: set[asyncio.Task[None]] = set()
 
     @staticmethod
     def _is_remote_media(path: str) -> bool:
@@ -100,136 +96,15 @@ class QQChannel(BaseChannel):
         """Return the active workspace root used by QQ publishing."""
         return (self._workspace or Path.cwd()).resolve(strict=False)
 
-    def _public_root(self) -> Path:
-        """Return the fixed public tree served by the gateway HTTP route."""
-        return ensure_dir(self._workspace_root() / "public")
-
-    def _out_root(self) -> Path:
-        """Return the default workspace out directory used for generated artifacts."""
-        return self._workspace_root() / "out"
-
-    def _resolve_media_public_dir(self) -> tuple[Path | None, str | None]:
-        """Resolve the local publish directory for QQ media under workspace/public."""
-        configured = Path(self.config.media_public_dir).expanduser()
-        if configured.is_absolute():
-            resolved = configured.resolve(strict=False)
-        else:
-            resolved = (self._workspace_root() / configured).resolve(strict=False)
-        public_root = self._public_root()
-        try:
-            resolved.relative_to(public_root)
-        except ValueError:
-            return None, f"QQ mediaPublicDir must stay under {public_root}"
-        return ensure_dir(resolved), None
-
-    @staticmethod
-    def _guess_image_suffix(path: Path, mime_type: str | None) -> str:
-        """Pick a reasonable output suffix for published QQ images."""
-        if path.suffix:
-            return path.suffix.lower()
-        return {
-            "image/png": ".png",
-            "image/jpeg": ".jpg",
-            "image/gif": ".gif",
-            "image/webp": ".webp",
-        }.get(mime_type or "", ".bin")
-
-    @staticmethod
-    def _is_image_file(path: Path) -> bool:
-        """Validate that a local file looks like an image supported by QQ rich media."""
-        try:
-            with path.open("rb") as f:
-                header = f.read(16)
-        except OSError:
-            return False
-        return detect_image_mime(header) is not None
-
-    @staticmethod
-    def _detect_image_mime(path: Path) -> str | None:
-        """Detect image mime type from the leading bytes of a file."""
-        try:
-            with path.open("rb") as f:
-                return detect_image_mime(f.read(16))
-        except OSError:
-            return None
-
-    async def _delete_published_media_later(self, path: Path, delay_seconds: int) -> None:
-        """Delete an auto-published QQ media file after a grace period."""
-        try:
-            await asyncio.sleep(delay_seconds)
-            path.unlink(missing_ok=True)
-        except Exception as e:
-            logger.debug("Failed to delete published QQ media {}: {}", path, e)
-
-    def _schedule_media_cleanup(self, path: Path) -> None:
-        """Best-effort cleanup for auto-published local QQ media."""
-        if self.config.media_ttl_seconds <= 0:
-            return
-        task = asyncio.create_task(
-            self._delete_published_media_later(path, self.config.media_ttl_seconds)
-        )
-        self._cleanup_tasks.add(task)
-        task.add_done_callback(self._cleanup_tasks.discard)
-
-    def _try_link_out_media_into_public(
-        self,
-        source: Path,
-        public_dir: Path,
-    ) -> tuple[Path | None, str | None]:
-        """Hard-link a generated workspace/out media file into public/qq."""
-        out_root = self._out_root().resolve(strict=False)
-        try:
-            source.relative_to(out_root)
-        except ValueError:
-            return None, f"QQ local media must stay under {public_dir} or {out_root}"
-
-        if not self._is_image_file(source):
-            return None, "QQ local media must be an image"
-
-        mime_type = self._detect_image_mime(source)
-        suffix = self._guess_image_suffix(source, mime_type)
-        published = public_dir / f"{source.stem}-{secrets.token_urlsafe(6)}{suffix}"
-        try:
-            os.link(source, published)
-        except OSError as e:
-            logger.warning("Failed to hard-link QQ media {} -> {}: {}", source, published, e)
-            return None, "failed to publish local file"
-        self._schedule_media_cleanup(published)
-        return published, None
-
     async def _publish_local_media(self, media_path: str) -> tuple[str | None, str | None]:
-        """Map a local public QQ media file, or a generated out file, to its served URL."""
-        if not self.config.media_base_url:
-            return None, "QQ local media publishing is not configured"
-
-        source = Path(media_path).expanduser()
-        try:
-            resolved = source.resolve(strict=True)
-        except FileNotFoundError:
-            return None, "local file not found"
-        except OSError as e:
-            logger.warning("Failed to resolve QQ media path {}: {}", media_path, e)
-            return None, "local file unavailable"
-
-        if not resolved.is_file():
-            return None, "local file not found"
-
-        public_dir, dir_error = self._resolve_media_public_dir()
-        if public_dir is None:
-            return None, dir_error
-
-        try:
-            relative_path = resolved.relative_to(public_dir)
-        except ValueError:
-            published, publish_error = self._try_link_out_media_into_public(resolved, public_dir)
-            if published is None:
-                return None, publish_error
-            relative_path = published.relative_to(public_dir)
-
-        media_url = urljoin(
-            f"{self.config.media_base_url.rstrip('/')}/",
-            quote(relative_path.as_posix(), safe="/"),
+        """Map a local delivery artifact to its served URL."""
+        _, media_url, error = resolve_delivery_media(
+            media_path,
+            self._workspace_root(),
+            self.config.media_base_url,
         )
+        if error:
+            return None, error
         return media_url, None
 
     def _next_msg_seq(self) -> int:
@@ -367,9 +242,6 @@ class QQChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the QQ bot."""
         self._running = False
-        for task in list(self._cleanup_tasks):
-            task.cancel()
-        self._cleanup_tasks.clear()
         if self._client:
             try:
                 await self._client.close()

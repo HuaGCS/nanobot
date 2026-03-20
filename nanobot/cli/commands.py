@@ -582,7 +582,7 @@ def gateway(
 
     # Create channel manager
     channels = ChannelManager(config, bus)
-    http_server = GatewayHttpServer(config.workspace_path, config.gateway.host, port)
+    http_server = GatewayHttpServer(config.gateway.host, port)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -639,10 +639,6 @@ def gateway(
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-
-    console.print(
-        f"[green]✓[/green] Public files: {http_server.public_dir} -> /public/"
-    )
 
     cron_status = cron.status()
     if cron_status["jobs"] > 0:

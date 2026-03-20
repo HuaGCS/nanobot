@@ -700,20 +700,17 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
       "allowFrom": ["YOUR_OPENID"],
-      "mediaBaseUrl": "https://bot.example.com/public/qq/",
-      "mediaPublicDir": "public/qq",
-      "mediaTtlSeconds": 600
+      "mediaBaseUrl": "https://files.example.com/out/"
     }
   }
 }
 ```
 
 `mediaBaseUrl` is optional, but it is required if you want nanobot to send local screenshots or
-other local image files through QQ. `mediaPublicDir` is resolved against the active startup
-workspace and must stay under `workspace/public`, because the built-in gateway HTTP server only
-serves that tree at `/public/`. nanobot accepts local QQ media from two places only: files already
-under `mediaPublicDir`, and generated image files under `workspace/out`, which nanobot will
-hard-link into `mediaPublicDir` automatically before sending.
+other local image files through QQ. nanobot does not serve local files over HTTP, so
+`mediaBaseUrl` must point to your own static file server. Generated delivery artifacts should be
+written under `workspace/out`, and `mediaBaseUrl` should expose that directory with matching
+relative paths.
 
 Multi-bot example:
 
@@ -753,12 +750,11 @@ Outbound QQ media sends remote `http(s)` images through the QQ rich-media `url` 
 For local image files, nanobot first publishes or maps the file to a public URL, then tries the
 documented `file_data` upload path together with that URL; if the installed QQ SDK/runtime path
 does not accept that upload, nanobot falls back to the existing URL-only rich-media flow.
-The built-in gateway route exposes `workspace/public` as `/public/`, so a common setup is
-`mediaBaseUrl = https://your-host/public/qq/`. Local QQ files are accepted from two controlled
-locations only: files already under `mediaPublicDir`, and generated image files under
-`workspace/out`, which nanobot will automatically hard-link into `workspace/public/qq` before
-sending. Files outside `mediaPublicDir` and `workspace/out` are rejected. Without that publishing
-config, local files still fall back to a text notice.
+nanobot does not serve local files itself, so `mediaBaseUrl` must point to your own HTTP server
+that exposes generated delivery artifacts. Tools and skills should write deliverable files under
+`workspace/out`; QQ maps local image paths from that directory onto `mediaBaseUrl` using the same
+relative path. Files outside `workspace/out` are rejected. Without that publishing config, local
+files still fall back to a text notice.
 
 When an agent uses shell/browser tools to create screenshots or other temporary files for delivery,
 it should write them under `workspace/out` instead of the workspace root so channel publishing rules
@@ -1342,6 +1338,10 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 - Serve multiple tenants with separate configs and runtime data
 
 ### Notes
+
+- nanobot does not expose local files itself. If you rely on local media delivery such as QQ
+  screenshots, serve the relevant delivery-artifact directory with your own HTTP server and point
+  `mediaBaseUrl` at it.
 
 - Each instance must use a different port if they run at the same time
 - Use a different workspace per instance if you want isolated memory, sessions, and skills
