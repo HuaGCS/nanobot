@@ -749,15 +749,16 @@ nanobot gateway
 
 Now send a message to the bot from QQ — it should respond!
 
-Outbound QQ media always uses the QQ `url`-based rich-media API. Remote `http(s)` image URLs can be
-sent directly. Local image files can also be sent when `mediaBaseUrl` points to a public URL and
-`mediaPublicDir` matches a directory under `workspace/public`; nanobot maps that local public path
-to a URL and then sends that URL through QQ. The built-in gateway route exposes
-`workspace/public` as `/public/`, so a common setup is `mediaBaseUrl = https://your-host/public/qq/`.
-If you generate screenshots under `workspace/out`, nanobot will automatically create a hard link in
-`workspace/public/qq` first, then send that public URL. Files outside `mediaPublicDir` and
-`workspace/out` are rejected. Without that publishing config, local files still fall back to a text
-notice.
+Outbound QQ media sends remote `http(s)` images through the QQ rich-media `url` flow directly.
+For local image files, nanobot first publishes or maps the file to a public URL, then tries the
+documented `file_data` upload path together with that URL; if the installed QQ SDK/runtime path
+does not accept that upload, nanobot falls back to the existing URL-only rich-media flow.
+The built-in gateway route exposes `workspace/public` as `/public/`, so a common setup is
+`mediaBaseUrl = https://your-host/public/qq/`. Local QQ files are accepted from two controlled
+locations only: files already under `mediaPublicDir`, and generated image files under
+`workspace/out`, which nanobot will automatically hard-link into `workspace/public/qq` before
+sending. Files outside `mediaPublicDir` and `workspace/out` are rejected. Without that publishing
+config, local files still fall back to a text notice.
 
 When an agent uses shell/browser tools to create screenshots or other temporary files for delivery,
 it should write them under `workspace/out` instead of the workspace root so channel publishing rules
