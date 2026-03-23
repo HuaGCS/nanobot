@@ -28,6 +28,7 @@ from nanobot.agent.i18n import (
     text,
 )
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.personas import build_persona_voice_instructions, load_persona_voice_settings
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -40,8 +41,9 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.speech import OpenAISpeechProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import build_status_content
+from nanobot.utils.helpers import build_status_content, ensure_dir, safe_filename
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -675,6 +677,137 @@ class AgentLoop:
             metadata={"render_as": "text"},
         )
 
+    @staticmethod
+    def _voice_reply_extension(response_format: str) -> str:
+        """Map TTS response formats to delivery file extensions."""
+        return {
+            "opus": ".ogg",
+            "mp3": ".mp3",
+            "aac": ".aac",
+            "flac": ".flac",
+            "wav": ".wav",
+            "pcm": ".pcm",
+            "silk": ".silk",
+        }.get(response_format, f".{response_format}")
+
+    @staticmethod
+    def _channel_base_name(channel: str) -> str:
+        """Normalize multi-instance channel routes such as telegram/main."""
+        return channel.split("/", 1)[0].lower()
+
+    def _voice_reply_enabled_for_channel(self, channel: str) -> bool:
+        """Return True when voice replies are enabled for the given channel."""
+        cfg = getattr(self.channels_config, "voice_reply", None)
+        if not cfg or not getattr(cfg, "enabled", False):
+            return False
+        route_name = channel.lower()
+        base_name = self._channel_base_name(channel)
+        enabled_channels = {
+            name.lower() for name in getattr(cfg, "channels", []) if isinstance(name, str)
+        }
+        if route_name not in enabled_channels and base_name not in enabled_channels:
+            return False
+        if base_name == "qq":
+            return getattr(cfg, "response_format", "opus") == "silk"
+        return base_name in {"telegram", "qq"}
+
+    def _voice_reply_profile(
+        self,
+        persona: str | None,
+    ) -> tuple[str, str | None, float | None]:
+        """Resolve voice, instructions, and speed for the active persona."""
+        cfg = getattr(self.channels_config, "voice_reply", None)
+        persona_voice = load_persona_voice_settings(self.workspace, persona)
+
+        extra_instructions = [
+            value.strip()
+            for value in (
+                getattr(cfg, "instructions", "") if cfg is not None else "",
+                persona_voice.instructions or "",
+            )
+            if isinstance(value, str) and value.strip()
+        ]
+        instructions = build_persona_voice_instructions(
+            self.workspace,
+            persona,
+            extra_instructions=" ".join(extra_instructions) if extra_instructions else None,
+        )
+        voice = persona_voice.voice or getattr(cfg, "voice", "alloy")
+        speed = (
+            persona_voice.speed
+            if persona_voice.speed is not None
+            else getattr(cfg, "speed", None) if cfg is not None else None
+        )
+        return voice, instructions, speed
+
+    async def _maybe_attach_voice_reply(
+        self,
+        outbound: OutboundMessage | None,
+        *,
+        persona: str | None = None,
+    ) -> OutboundMessage | None:
+        """Optionally synthesize the final text reply into a voice attachment."""
+        if (
+            outbound is None
+            or not outbound.content
+            or not self._voice_reply_enabled_for_channel(outbound.channel)
+        ):
+            return outbound
+
+        cfg = getattr(self.channels_config, "voice_reply", None)
+        if cfg is None:
+            return outbound
+
+        api_key = (getattr(cfg, "api_key", "") or getattr(self.provider, "api_key", "") or "").strip()
+        if not api_key:
+            logger.warning(
+                "Voice reply enabled for {}, but no TTS api_key is configured",
+                outbound.channel,
+            )
+            return outbound
+
+        api_base = (
+            getattr(cfg, "api_base", "")
+            or getattr(self.provider, "api_base", "")
+            or "https://api.openai.com/v1"
+        ).strip()
+        response_format = getattr(cfg, "response_format", "opus")
+        model = getattr(cfg, "model", "gpt-4o-mini-tts")
+        voice, instructions, speed = self._voice_reply_profile(persona)
+        media_dir = ensure_dir(self.workspace / "out" / "voice")
+        filename = safe_filename(
+            f"{outbound.channel}_{outbound.chat_id}_{int(time.time() * 1000)}"
+        ) + self._voice_reply_extension(response_format)
+        output_path = media_dir / filename
+
+        try:
+            provider = OpenAISpeechProvider(api_key=api_key, api_base=api_base)
+            await provider.synthesize_to_file(
+                outbound.content,
+                model=model,
+                voice=voice,
+                instructions=instructions,
+                speed=speed,
+                response_format=response_format,
+                output_path=output_path,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to synthesize voice reply for {}:{}",
+                outbound.channel,
+                outbound.chat_id,
+            )
+            return outbound
+
+        return OutboundMessage(
+            channel=outbound.channel,
+            chat_id=outbound.chat_id,
+            content=outbound.content,
+            reply_to=outbound.reply_to,
+            media=[*(outbound.media or []), str(output_path)],
+            metadata=dict(outbound.metadata or {}),
+        )
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -1072,8 +1205,14 @@ class AgentLoop:
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._ensure_background_token_consolidation(session)
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            return await self._maybe_attach_voice_reply(
+                OutboundMessage(
+                    channel=channel,
+                    chat_id=chat_id,
+                    content=final_content or "Background task completed.",
+                ),
+                persona=persona,
+            )
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -1156,9 +1295,14 @@ class AgentLoop:
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-        return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
-            metadata=msg.metadata or {},
+        return await self._maybe_attach_voice_reply(
+            OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=final_content,
+                metadata=msg.metadata or {},
+            ),
+            persona=persona,
         )
 
     @staticmethod

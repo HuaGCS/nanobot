@@ -264,6 +264,57 @@ That's it! You have a working AI assistant in 2 minutes.
 
 `baseUrl` can point either to the SearXNG root (for example `http://localhost:8080`) or directly to `/search`.
 
+### Optional: Voice Replies
+
+Enable `channels.voiceReply` when you want nanobot to attach a synthesized voice reply on
+supported outbound channels such as Telegram. QQ voice replies are also supported when your TTS
+endpoint can return `silk`.
+
+```json
+{
+  "channels": {
+    "voiceReply": {
+      "enabled": true,
+      "channels": ["telegram"],
+      "url": "https://your-tts-endpoint.example.com/v1",
+      "model": "gpt-4o-mini-tts",
+      "voice": "alloy",
+      "instructions": "keep the delivery calm and clear",
+      "speed": 1.0,
+      "responseFormat": "opus"
+    }
+  }
+}
+```
+
+`voiceReply` currently adds a voice attachment while keeping the normal text reply. For QQ voice
+delivery, use `responseFormat: "silk"` because QQ local voice upload expects `.silk`. If `apiKey`
+and `apiBase` are omitted, nanobot falls back to the active provider credentials; use an
+OpenAI-compatible TTS endpoint for this.
+`voiceReply.url` is optional and can point either to a provider base URL such as
+`https://api.openai.com/v1` or directly to an `/audio/speech` endpoint. If omitted, nanobot uses
+the current conversation provider URL. `apiBase` remains supported as a legacy alias.
+
+Voice replies automatically follow the active session persona. nanobot builds TTS style
+instructions from that persona's `SOUL.md` and `USER.md`, so switching `/persona` changes both the
+text response style and the generated speech style together.
+
+If a specific persona needs a fixed voice or speaking pattern, add `VOICE.json` under the persona
+workspace:
+
+- Default persona: `<workspace>/VOICE.json`
+- Custom persona: `<workspace>/personas/<name>/VOICE.json`
+
+Example:
+
+```json
+{
+  "voice": "nova",
+  "instructions": "sound crisp, confident, and slightly faster than normal",
+  "speed": 1.15
+}
+```
+
 ## 💬 Chat Apps
 
 Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./docs/CHANNEL_PLUGIN_GUIDE.md).
@@ -708,10 +759,10 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 }
 ```
 
-`mediaBaseUrl` is optional. For local QQ images, nanobot will first try direct `file_data` upload
-from generated delivery artifacts under `workspace/out`. Configuring `mediaBaseUrl` is still
-recommended, because nanobot can then map those files onto your own static file server and fall
-back to the URL-based rich-media flow when needed.
+For local QQ media, nanobot uploads files directly with `file_data` from generated delivery
+artifacts under `workspace/out`. Local uploads do not require `mediaBaseUrl`, and nanobot does not
+fall back to URL-based upload for local files anymore. Supported local QQ rich media are images,
+`.mp4` video, and `.silk` voice.
 
 Multi-bot example:
 
@@ -1245,7 +1296,7 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 ```
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
-nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `channels.sendProgress`, and `channels.sendToolHints`. Channel connection settings and provider credentials still require a restart.
+nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `channels.sendProgress`, `channels.sendToolHints`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
 
 
 

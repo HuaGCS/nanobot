@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -12,6 +12,7 @@ class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
 
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""
@@ -356,6 +357,20 @@ class WecomMultiConfig(Base):
     instances: list[WecomInstanceConfig] = Field(default_factory=list)
 
 
+class VoiceReplyConfig(Base):
+    """Optional text-to-speech replies for supported outbound channels."""
+
+    enabled: bool = False
+    channels: list[str] = Field(default_factory=lambda: ["telegram"])
+    model: str = "gpt-4o-mini-tts"
+    voice: str = "alloy"
+    instructions: str = ""
+    speed: float | None = None
+    response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm", "silk"] = "opus"
+    api_key: str = ""
+    api_base: str = Field(default="", validation_alias=AliasChoices("apiBase", "url"))
+
+
 def _coerce_multi_channel_config(
     value: Any,
     single_cls: type[BaseModel],
@@ -369,11 +384,14 @@ def _coerce_multi_channel_config(
     if isinstance(value, dict) and "instances" in value:
         return multi_cls.model_validate(value)
     return single_cls.model_validate(value)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    voice_reply: VoiceReplyConfig = Field(default_factory=VoiceReplyConfig)
     whatsapp: WhatsAppConfig | WhatsAppMultiConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig | TelegramMultiConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig | DiscordMultiConfig = Field(default_factory=DiscordConfig)
@@ -514,6 +532,7 @@ class ExecToolConfig(Base):
     enable: bool = True
     timeout: int = 60
     path_append: str = ""
+
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""

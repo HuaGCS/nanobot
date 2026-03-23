@@ -276,7 +276,6 @@ async def test_send_local_media_under_out_dir_uses_c2c_file_api(
             "params": {"openid": "user123"},
             "json": {
                 "file_type": 1,
-                "url": "https://files.example.com/out/demo.png",
                 "file_data": b64encode(b"\x89PNG\r\n\x1a\nfake-png").decode("ascii"),
                 "srv_send_msg": False,
             },
@@ -338,7 +337,6 @@ async def test_send_local_media_in_nested_out_path_uses_relative_url(
             "params": {"openid": "user123"},
             "json": {
                 "file_type": 1,
-                "url": "https://files.example.com/qq-media/shots/github.png",
                 "file_data": b64encode(b"\x89PNG\r\n\x1a\nfake-png").decode("ascii"),
                 "srv_send_msg": False,
             },
@@ -408,8 +406,7 @@ async def test_send_local_media_outside_out_falls_back_to_text_notice(
 
 
 @pytest.mark.asyncio
-async def test_send_local_media_falls_back_to_url_only_upload_when_file_data_upload_fails(
-    monkeypatch,
+async def test_send_local_media_with_media_base_url_still_falls_back_to_text_notice_when_file_data_upload_fails(
     tmp_path,
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -431,7 +428,6 @@ async def test_send_local_media_falls_back_to_url_only_upload_when_file_data_upl
     )
     channel._client = _FakeClient()
     channel._client.api.raise_on_raw_file_upload = True
-    monkeypatch.setattr("nanobot.channels.qq.validate_url_target", lambda url: (True, ""))
 
     await channel.send(
         OutboundMessage(
@@ -443,20 +439,12 @@ async def test_send_local_media_falls_back_to_url_only_upload_when_file_data_upl
         )
     )
 
-    assert channel._client.api.c2c_file_calls == [
-        {
-            "openid": "user123",
-            "file_type": 1,
-            "url": "https://files.example.com/out/demo.png",
-            "srv_send_msg": False,
-        }
-    ]
+    assert channel._client.api.c2c_file_calls == []
     assert channel._client.api.c2c_calls == [
         {
             "openid": "user123",
-            "msg_type": 7,
-            "content": "hello",
-            "media": {"file_info": "c2c-file-info", "file_uuid": "c2c-file", "ttl": 60},
+            "msg_type": 0,
+            "content": "hello\n[Failed to send: demo.png - QQ local file_data upload failed]",
             "msg_id": "msg1",
             "msg_seq": 2,
         }
@@ -596,7 +584,60 @@ async def test_send_non_image_media_from_out_falls_back_to_text_notice(
         {
             "openid": "user123",
             "msg_type": 0,
-            "content": "hello\n[Failed to send: note.txt - local delivery media must be an image]",
+            "content": (
+                "hello\n[Failed to send: note.txt - local delivery media must be an image, .mp4 video, "
+                "or .silk voice]"
+            ),
+            "msg_id": "msg1",
+            "msg_seq": 2,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_local_silk_voice_uses_file_type_three_direct_upload(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    out_dir = workspace / "out"
+    out_dir.mkdir()
+    source = out_dir / "reply.silk"
+    source.write_bytes(b"fake-silk")
+
+    channel = QQChannel(
+        QQConfig(app_id="app", secret="secret", allow_from=["*"]),
+        MessageBus(),
+        workspace=workspace,
+    )
+    channel._client = _FakeClient()
+
+    await channel.send(
+        OutboundMessage(
+            channel="qq",
+            chat_id="user123",
+            content="hello",
+            media=[str(source)],
+            metadata={"message_id": "msg1"},
+        )
+    )
+
+    assert channel._client.api.raw_file_upload_calls == [
+        {
+            "method": "POST",
+            "path": "/v2/users/{openid}/files",
+            "params": {"openid": "user123"},
+            "json": {
+                "file_type": 3,
+                "file_data": b64encode(b"fake-silk").decode("ascii"),
+                "srv_send_msg": False,
+            },
+        }
+    ]
+    assert channel._client.api.c2c_calls == [
+        {
+            "openid": "user123",
+            "msg_type": 7,
+            "content": "hello",
+            "media": {"file_info": "c2c-file-info", "file_uuid": "c2c-file", "ttl": 60},
             "msg_id": "msg1",
             "msg_seq": 2,
         }

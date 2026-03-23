@@ -5,6 +5,7 @@ import base64
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -13,7 +14,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import QQConfig, QQInstanceConfig
 from nanobot.security.network import validate_url_target
-from nanobot.utils.delivery import resolve_delivery_media
+from nanobot.utils.delivery import delivery_artifacts_root, is_image_file
 
 try:
     import botpy
@@ -97,17 +98,50 @@ class QQChannel(BaseChannel):
         """Return the active workspace root used by QQ publishing."""
         return (self._workspace or Path.cwd()).resolve(strict=False)
 
-    async def _publish_local_media(
+    def _resolve_local_media(
         self,
         media_path: str,
-    ) -> tuple[Path | None, str | None, str | None]:
-        """Resolve a local delivery artifact and optionally map it to its served URL."""
-        local_path, media_url, error = resolve_delivery_media(
-            media_path,
-            self._workspace_root(),
-            self.config.media_base_url,
-        )
-        return local_path, media_url, error
+    ) -> tuple[Path | None, int | None, str | None]:
+        """Resolve a local delivery artifact and infer the QQ rich-media file type."""
+        source = Path(media_path).expanduser()
+        try:
+            resolved = source.resolve(strict=True)
+        except FileNotFoundError:
+            return None, None, "local file not found"
+        except OSError as e:
+            logger.warning("Failed to resolve local QQ media path {}: {}", media_path, e)
+            return None, None, "local file unavailable"
+
+        if not resolved.is_file():
+            return None, None, "local file not found"
+
+        artifacts_root = delivery_artifacts_root(self._workspace_root())
+        try:
+            resolved.relative_to(artifacts_root)
+        except ValueError:
+            return None, None, f"local delivery media must stay under {artifacts_root}"
+
+        suffix = resolved.suffix.lower()
+        if is_image_file(resolved):
+            return resolved, 1, None
+        if suffix == ".mp4":
+            return resolved, 2, None
+        if suffix == ".silk":
+            return resolved, 3, None
+        return None, None, "local delivery media must be an image, .mp4 video, or .silk voice"
+
+    @staticmethod
+    def _remote_media_file_type(media_url: str) -> int | None:
+        """Infer a QQ rich-media file type from a remote URL."""
+        path = urlparse(media_url).path.lower()
+        if path.endswith(".mp4"):
+            return 2
+        if path.endswith(".silk"):
+            return 3
+        image_exts = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+        if path.endswith(image_exts):
+            return 1
+        return None
 
     def _next_msg_seq(self) -> int:
         """Return the next QQ message sequence number."""
@@ -136,15 +170,16 @@ class QQChannel(BaseChannel):
         self,
         chat_id: str,
         msg_type: str,
+        file_type: int,
         media_url: str,
         content: str | None,
         msg_id: str | None,
     ) -> None:
-        """Send one QQ remote image URL as a rich-media message."""
+        """Send one QQ remote rich-media URL as a rich-media message."""
         if msg_type == "group":
             media = await self._client.api.post_group_file(
                 group_openid=chat_id,
-                file_type=1,
+                file_type=file_type,
                 url=media_url,
                 srv_send_msg=False,
             )
@@ -159,7 +194,7 @@ class QQChannel(BaseChannel):
         else:
             media = await self._client.api.post_c2c_file(
                 openid=chat_id,
-                file_type=1,
+                file_type=file_type,
                 url=media_url,
                 srv_send_msg=False,
             )
@@ -176,22 +211,20 @@ class QQChannel(BaseChannel):
         self,
         chat_id: str,
         msg_type: str,
-        media_url: str | None,
+        file_type: int,
         local_path: Path,
         content: str | None,
         msg_id: str | None,
     ) -> None:
-        """Upload a local QQ image using file_data and, when available, a public URL."""
+        """Upload a local QQ rich-media file using file_data."""
         if not self._client or Route is None:
             raise RuntimeError("QQ client not initialized")
 
         payload = {
-            "file_type": 1,
+            "file_type": file_type,
             "file_data": self._encode_file_data(local_path),
             "srv_send_msg": False,
         }
-        if media_url:
-            payload["url"] = media_url
         if msg_type == "group":
             route = Route("POST", "/v2/groups/{group_openid}/files", group_openid=chat_id)
             media = await self._client.api._http.request(route, json=payload)
@@ -265,15 +298,13 @@ class QQChannel(BaseChannel):
             fallback_lines: list[str] = []
 
             for media_path in msg.media:
-                resolved_media = media_path
                 local_media_path: Path | None = None
+                local_file_type: int | None = None
                 if not self._is_remote_media(media_path):
-                    local_media_path, resolved_media, publish_error = await self._publish_local_media(
-                        media_path
-                    )
+                    local_media_path, local_file_type, publish_error = self._resolve_local_media(media_path)
                     if local_media_path is None:
                         logger.warning(
-                            "QQ outbound local media could not be published: {} ({})",
+                            "QQ outbound local media could not be uploaded directly: {} ({})",
                             media_path,
                             publish_error,
                         )
@@ -281,65 +312,51 @@ class QQChannel(BaseChannel):
                             self._failed_media_notice(media_path, publish_error)
                         )
                         continue
-
-                if resolved_media:
-                    ok, error = validate_url_target(resolved_media)
+                else:
+                    ok, error = validate_url_target(media_path)
                     if not ok:
                         logger.warning("QQ outbound media blocked by URL validation: {}", error)
                         fallback_lines.append(self._failed_media_notice(media_path, error))
                         continue
+                    remote_file_type = self._remote_media_file_type(media_path)
+                    if remote_file_type is None:
+                        fallback_lines.append(
+                            self._failed_media_notice(
+                                media_path,
+                                "remote QQ media must be an image URL, .mp4 video, or .silk voice",
+                            )
+                        )
+                        continue
 
                 try:
                     if local_media_path is not None:
-                        try:
-                            await self._post_local_media_message(
-                                msg.chat_id,
-                                msg_type,
-                                resolved_media,
-                                local_media_path.resolve(strict=True),
-                                msg.content if msg.content and not content_sent else None,
-                                msg_id,
-                            )
-                        except Exception as local_upload_error:
-                            if resolved_media:
-                                logger.warning(
-                                    "QQ local file_data upload failed for {}: {}, falling back to URL-only upload",
-                                    local_media_path,
-                                    local_upload_error,
-                                )
-                                await self._post_remote_media_message(
-                                    msg.chat_id,
-                                    msg_type,
-                                    resolved_media,
-                                    msg.content if msg.content and not content_sent else None,
-                                    msg_id,
-                                )
-                            else:
-                                logger.warning(
-                                    "QQ local file_data upload failed for {} without mediaBaseUrl fallback: {}",
-                                    local_media_path,
-                                    local_upload_error,
-                                )
-                                fallback_lines.append(
-                                    self._failed_media_notice(
-                                        media_path,
-                                        "QQ local file_data upload failed",
-                                    )
-                                )
-                                continue
+                        await self._post_local_media_message(
+                            msg.chat_id,
+                            msg_type,
+                            local_file_type or 1,
+                            local_media_path.resolve(strict=True),
+                            msg.content if msg.content and not content_sent else None,
+                            msg_id,
+                        )
                     else:
                         await self._post_remote_media_message(
                             msg.chat_id,
                             msg_type,
-                            resolved_media,
+                            remote_file_type,
+                            media_path,
                             msg.content if msg.content and not content_sent else None,
                             msg_id,
                         )
                     if msg.content and not content_sent:
                         content_sent = True
                 except Exception as media_error:
-                    logger.error("Error sending QQ media {}: {}", resolved_media, media_error)
-                    fallback_lines.append(self._failed_media_notice(media_path))
+                    logger.error("Error sending QQ media {}: {}", media_path, media_error)
+                    if local_media_path is not None:
+                        fallback_lines.append(
+                            self._failed_media_notice(media_path, "QQ local file_data upload failed")
+                        )
+                    else:
+                        fallback_lines.append(self._failed_media_notice(media_path))
 
             text_parts: list[str] = []
             if msg.content and not content_sent:
