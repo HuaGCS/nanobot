@@ -49,6 +49,7 @@ class TelegramConfig(Base):
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
     connection_pool_size: int = 32  # Outbound Telegram API HTTP pool size
     pool_timeout: float = 5.0  # Shared HTTP pool timeout for bot sends and getUpdates
+    streaming: bool = True  # Progressive edit-based streaming for final text replies
 
 
 class TelegramInstanceConfig(TelegramConfig):
@@ -387,7 +388,14 @@ def _coerce_multi_channel_config(
 
 
 class ChannelsConfig(Base):
-    """Configuration for chat channels."""
+    """Configuration for chat channels.
+
+    Built-in and plugin channel configs are stored as extra fields (dicts).
+    Each channel parses its own config in __init__.
+    Per-channel "streaming": true enables streaming output (requires send_delta impl).
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
@@ -480,9 +488,11 @@ class ProvidersConfig(Base):
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
+    ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
+    mistral: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
