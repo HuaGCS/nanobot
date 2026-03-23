@@ -32,6 +32,7 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - If a slash command should appear in Telegram's native command menu, also update `nanobot/channels/telegram.py`.
 - `/skill` currently supports `search`, `install`, `uninstall`, `list`, and `update`. Keep subcommand dispatch in `nanobot/agent/loop.py`.
 - `/mcp` supports the default `list` behavior (and explicit `/mcp list`) to show configured MCP servers and registered MCP tools.
+- `/status` should return plain-text runtime info for the active session and stay wired into `/help` plus Telegram's command menu/localization coverage.
 - Agent runtime config should be hot-reloaded from the active `config.json` for safe in-process fields such as `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `channels.sendProgress`, and `channels.sendToolHints`. Channel connection settings and provider credentials still require a restart.
 - nanobot does not expose local files over HTTP. If a feature needs a public URL for local files, provide your own static file server and point config such as `mediaBaseUrl` at it.
 - Generated screenshots, downloads, and other temporary user-delivery artifacts should be written under `workspace/out`, not the workspace root. Treat that as the generic delivery-artifact root for tools, MCP servers, and skills.

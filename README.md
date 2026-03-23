@@ -191,9 +191,11 @@ nanobot channels login
 nanobot onboard
 ```
 
+Use `nanobot onboard --wizard` if you want the interactive setup wizard.
+
 **2. Configure** (`~/.nanobot/config.json`)
 
-Add or merge these **two parts** into your config (other options have defaults).
+Configure these **two parts** in your config (other options have defaults).
 
 *Set your API key* (e.g. OpenRouter, recommended for global users):
 ```json
@@ -983,6 +985,7 @@ Config file: `~/.nanobot/config.json`
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
 Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
+No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 **1. Login:**
 ```bash
@@ -995,6 +998,44 @@ nanobot provider login openai-codex
   "agents": {
     "defaults": {
       "model": "openai-codex/gpt-5.1-codex"
+    }
+  }
+}
+```
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
+
+# Target a specific workspace/config locally
+nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+
+# One-off workspace override on top of that config
+nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
+```
+
+> Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+
+<details>
+<summary><b>GitHub Copilot (OAuth)</b></summary>
+
+GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured.
+No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+
+**1. Login:**
+```bash
+nanobot provider login github-copilot
+```
+
+**2. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "github-copilot/gpt-4.1"
     }
   }
 }
@@ -1218,6 +1259,7 @@ nanobot hot-reloads agent runtime config from the active `config.json` on the ne
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
@@ -1349,6 +1391,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | Command | Description |
 |---------|-------------|
 | `nanobot onboard` | Initialize config & workspace at `~/.nanobot/` |
+| `nanobot onboard --wizard` | Launch the interactive onboarding wizard |
 | `nanobot onboard -c <config> -w <workspace>` | Initialize or refresh a specific instance config and workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent -w <workspace>` | Chat against a specific workspace |
@@ -1385,6 +1428,7 @@ These commands are available inside chats handled by `nanobot agent` or `nanobot
 | `/mcp [list]` | List configured MCP servers and registered MCP tools |
 | `/stop` | Stop the current task |
 | `/restart` | Restart the bot process |
+| `/status` | Show runtime status, token usage, and session context estimate |
 | `/help` | Show command help |
 
 `/skill` uses the active workspace for the current process, not a hard-coded

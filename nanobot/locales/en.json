@@ -17,6 +17,7 @@
     "cmd_stop": "/stop — Stop the current task",
     "cmd_restart": "/restart — Restart the bot",
     "cmd_help": "/help — Show available commands",
+    "cmd_status": "/status — Show bot status",
     "skill_usage": "Usage:\n/skill search <query>\n/skill install <slug>\n/skill uninstall <slug>\n/skill list\n/skill update",
     "skill_search_missing_query": "Missing query.\n\nUsage:\n/skill search <query>",
     "skill_search_no_results": "No skills found for \"{query}\". Try broader keywords, or use /skill install <slug> if you know the exact slug.",
@@ -62,6 +63,7 @@
     "mcp": "List MCP servers and tools",
     "stop": "Stop the current task",
     "help": "Show command help",
-    "restart": "Restart the bot"
+    "restart": "Restart the bot",
+    "status": "Show bot status"
   }
 }

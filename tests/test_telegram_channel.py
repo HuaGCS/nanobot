@@ -39,7 +39,7 @@ class _FakeBot:
         self.get_me_calls += 1
         return SimpleNamespace(id=999, username="nanobot_test")
 
-    async def set_my_commands(self, commands) -> None:
+    async def set_my_commands(self, commands, language_code=None) -> None:
         self.commands = commands
 
     async def send_message(self, **kwargs) -> None:
@@ -175,6 +175,7 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert poll_req.kwargs["connection_pool_size"] == 4
     assert builder.request_value is api_req
     assert builder.get_updates_request_value is poll_req
+    assert any(cmd.command == "status" for cmd in app.bot.commands)
 
 
 @pytest.mark.asyncio
@@ -775,3 +776,20 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
+
+
+@pytest.mark.asyncio
+async def test_on_help_includes_restart_command() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    update = _make_telegram_update(text="/help", chat_type="private")
+    update.message.reply_text = AsyncMock()
+
+    await channel._on_help(update, None)
+
+    update.message.reply_text.assert_awaited_once()
+    help_text = update.message.reply_text.await_args.args[0]
+    assert "/restart" in help_text
+    assert "/status" in help_text
