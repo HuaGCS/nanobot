@@ -32,7 +32,9 @@ class WhatsAppChannel(BaseChannel):
     def default_config(cls) -> dict[str, object]:
         return WhatsAppConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: WhatsAppConfig | WhatsAppInstanceConfig, bus: MessageBus):
+    def __init__(self, config: WhatsAppConfig | WhatsAppInstanceConfig | dict, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WhatsAppConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: WhatsAppConfig | WhatsAppInstanceConfig = config
         self._ws = None
@@ -175,6 +177,12 @@ class WhatsAppChannel(BaseChannel):
                     self._processed_message_ids.popitem(last=False)
 
             # Extract just the phone number or lid as chat_id
+            is_group = data.get("isGroup", False)
+            was_mentioned = data.get("wasMentioned", False)
+
+            if is_group and self.config.group_policy == "mention" and not was_mentioned:
+                return
+
             user_id = pn if pn else sender
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
             logger.info("Sender {}", sender)

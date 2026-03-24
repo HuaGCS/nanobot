@@ -21,6 +21,7 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    group_policy: Literal["open", "mention"] = "open"
 
 
 class WhatsAppInstanceConfig(WhatsAppConfig):
@@ -46,6 +47,7 @@ class TelegramConfig(Base):
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
     connection_pool_size: int = 32  # Outbound Telegram API HTTP pool size
     pool_timeout: float = 5.0  # Shared HTTP pool timeout for bot sends and getUpdates
@@ -319,6 +321,10 @@ class QQConfig(Base):
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids
+    msg_format: Literal["plain", "markdown"] = "plain"
+    media_dir: str = ""
+    download_chunk_size: int = 1024 * 256
+    download_max_bytes: int = 1024 * 1024 * 200
     media_base_url: str = ""  # Public base URL used to expose workspace/out QQ media files
 
 

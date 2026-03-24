@@ -938,6 +938,9 @@ class FeishuChannel(BaseChannel):
             reply_message_id: str | None = None
             if self.config.reply_to_message and not msg.metadata.get("_progress", False):
                 reply_message_id = msg.metadata.get("message_id") or None
+            # For topic group messages, always reply to keep context in thread
+            elif msg.metadata.get("thread_id"):
+                reply_message_id = msg.metadata.get("root_id") or msg.metadata.get("message_id") or None
 
             first_send = True
 
@@ -1095,6 +1098,7 @@ class FeishuChannel(BaseChannel):
 
             parent_id = getattr(message, "parent_id", None) or None
             root_id = getattr(message, "root_id", None) or None
+            thread_id = getattr(message, "thread_id", None) or None
 
             if parent_id and self._client:
                 loop = asyncio.get_running_loop()
@@ -1120,6 +1124,7 @@ class FeishuChannel(BaseChannel):
                     "msg_type": msg_type,
                     "parent_id": parent_id,
                     "root_id": root_id,
+                    "thread_id": thread_id,
                 }
             )
 

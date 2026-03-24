@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
-from telegram import BotCommand, ReplyParameters, Update
+from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.error import TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -800,6 +800,7 @@ class TelegramChannel(BaseChannel):
                     "session_key": session_key,
                 }
                 self._start_typing(str_chat_id)
+                await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
                 buf["contents"].append(content)
@@ -810,6 +811,7 @@ class TelegramChannel(BaseChannel):
 
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
+        await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Forward to the message bus
         await self._handle_message(
@@ -848,6 +850,19 @@ class TelegramChannel(BaseChannel):
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
+
+    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
+        """Add an emoji reaction best-effort without interrupting message handling."""
+        if not self._app or not emoji:
+            return
+        try:
+            await self._app.bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=message_id,
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+        except Exception as e:
+            logger.debug("Telegram reaction failed: {}", e)
 
     async def _typing_loop(self, chat_id: str) -> None:
         """Repeatedly send 'typing' action until cancelled."""
