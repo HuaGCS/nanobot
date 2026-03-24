@@ -5,7 +5,7 @@ import os
 import select
 import signal
 import sys
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -293,7 +293,7 @@ def onboard(
 
     # Run interactive wizard if enabled
     if wizard:
-        from nanobot.cli.onboard_wizard import run_onboard
+        from nanobot.cli.onboard import run_onboard
 
         try:
             result = run_onboard(initial_config=config)
@@ -649,6 +649,13 @@ def gateway(
             chat_id=chat_id,
             on_progress=_silent,
         )
+
+        # Keep a small tail of heartbeat history so the loop stays bounded
+        # without losing all short-term context between runs.
+        session = agent.sessions.get_or_create("heartbeat")
+        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        agent.sessions.save(session)
+
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
@@ -1029,30 +1036,75 @@ def _get_bridge_dir() -> Path:
 
 
 @channels_app.command("login")
-def channels_login():
-    """Link device via QR code."""
-    import subprocess
-
+def channels_login(
+    channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+):
+    """Authenticate with a channel via QR code or other interactive login."""
+    from nanobot.channels.registry import discover_all
     from nanobot.config.loader import load_config
-    from nanobot.config.paths import get_runtime_subdir
 
     config = load_config()
-    bridge_dir = _get_bridge_dir()
+    channel_cfg = getattr(config.channels, channel_name, None) or {}
 
-    console.print(f"{__logo__} Starting bridge...")
-    console.print("Scan the QR code to connect.\n")
+    # Validate channel exists
+    all_channels = discover_all()
+    if channel_name not in all_channels:
+        available = ", ".join(all_channels.keys())
+        console.print(f"[red]Unknown channel: {channel_name}[/red]  Available: {available}")
+        raise typer.Exit(1)
 
-    env = {**os.environ}
-    if config.channels.whatsapp.bridge_token:
-        env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
-    env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
+    console.print(f"{__logo__} {all_channels[channel_name].display_name} Login\n")
 
-    try:
-        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Bridge failed: {e}[/red]")
-    except FileNotFoundError:
-        console.print("[red]npm not found. Please install Node.js.[/red]")
+    channel_cls = all_channels[channel_name]
+    channel = channel_cls(channel_cfg, bus=None)
+
+    success = asyncio.run(channel.login(force=force))
+
+    if not success:
+        raise typer.Exit(1)
+
+
+# ============================================================================
+# Plugin Commands
+# ============================================================================
+
+plugins_app = typer.Typer(help="Manage channel plugins")
+app.add_typer(plugins_app, name="plugins")
+
+
+@plugins_app.command("list")
+def plugins_list():
+    """List all discovered channels (built-in and plugins)."""
+    from nanobot.channels.registry import discover_all, discover_channel_names
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    builtin_names = set(discover_channel_names())
+    all_channels = discover_all()
+
+    table = Table(title="Channel Plugins")
+    table.add_column("Name", style="cyan")
+    table.add_column("Source", style="magenta")
+    table.add_column("Enabled", style="green")
+
+    for name in sorted(all_channels):
+        cls = all_channels[name]
+        source = "builtin" if name in builtin_names else "plugin"
+        section = getattr(config.channels, name, None)
+        if section is None:
+            enabled = False
+        elif isinstance(section, dict):
+            enabled = section.get("enabled", False)
+        else:
+            enabled = getattr(section, "enabled", False)
+        table.add_row(
+            cls.display_name,
+            source,
+            "[green]yes[/green]" if enabled else "[dim]no[/dim]",
+        )
+
+    console.print(table)
 
 
 # ============================================================================

@@ -43,8 +43,9 @@ class MessageTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Send a message to the user. Use this when you want to communicate something. "
-            "If you generate local files for delivery first, save them under workspace/out."
+            "Send a message to the user, optionally with file attachments. "
+            "Use the 'media' parameter to attach files. "
+            "Generated local files should be written under workspace/out first."
         )
 
     @property

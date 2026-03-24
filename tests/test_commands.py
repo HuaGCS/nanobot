@@ -134,10 +134,10 @@ def test_onboard_help_shows_workspace_and_config_options():
 def test_onboard_interactive_discard_does_not_save_or_create_workspace(mock_paths, monkeypatch):
     config_file, workspace_dir, _ = mock_paths
 
-    from nanobot.cli.onboard_wizard import OnboardResult
+    from nanobot.cli.onboard import OnboardResult
 
     monkeypatch.setattr(
-        "nanobot.cli.onboard_wizard.run_onboard",
+        "nanobot.cli.onboard.run_onboard",
         lambda initial_config: OnboardResult(config=initial_config, should_save=False),
     )
 
@@ -175,10 +175,10 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     config_path = tmp_path / "instance" / "config.json"
     workspace_path = tmp_path / "workspace"
 
-    from nanobot.cli.onboard_wizard import OnboardResult
+    from nanobot.cli.onboard import OnboardResult
 
     monkeypatch.setattr(
-        "nanobot.cli.onboard_wizard.run_onboard",
+        "nanobot.cli.onboard.run_onboard",
         lambda initial_config: OnboardResult(config=initial_config, should_save=True),
     )
     monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
@@ -471,7 +471,6 @@ def test_agent_hints_about_deprecated_memory_window(mock_agent_runtime, tmp_path
     assert "memoryWindow" in result.stdout
     assert "no longer used" in result.stdout
 
-
 def test_agent_passes_web_search_config_to_agent_loop(mock_agent_runtime) -> None:
     mock_agent_runtime["config"].tools.web.search.provider = "searxng"
     mock_agent_runtime["config"].tools.web.search.base_url = "http://localhost:8080"
@@ -484,6 +483,12 @@ def test_agent_passes_web_search_config_to_agent_loop(mock_agent_runtime) -> Non
     assert kwargs["web_search_provider"] == "searxng"
     assert kwargs["web_search_base_url"] == "http://localhost:8080"
     assert kwargs["web_search_max_results"] == 7
+
+
+def test_heartbeat_retains_recent_messages_by_default():
+    config = Config()
+
+    assert config.gateway.heartbeat.keep_recent_messages == 8
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
@@ -567,6 +572,8 @@ def test_gateway_warns_about_deprecated_memory_window(monkeypatch, tmp_path: Pat
     assert isinstance(result.exception, _StopGatewayError)
     assert "memoryWindow" in result.stdout
     assert "contextWindowTokens" in result.stdout
+
+
 def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -640,7 +647,6 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
     assert isinstance(result.exception, _StopGatewayError)
     assert "port 18792" in result.stdout
 
-
 def test_gateway_constructs_http_server_without_public_file_options(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -689,3 +695,9 @@ def test_gateway_constructs_http_server_without_public_file_options(monkeypatch,
     assert seen["port"] == config.gateway.port
     assert seen["http_server_ctor"] is True
     assert "public_files_enabled" not in seen["agent_kwargs"]
+
+
+def test_channels_login_requires_channel_name() -> None:
+    result = runner.invoke(app, ["channels", "login"])
+
+    assert result.exit_code == 2
