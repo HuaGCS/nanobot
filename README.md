@@ -1603,7 +1603,7 @@ These commands are available inside chats handled by `nanobot agent` or `nanobot
 | `/persona set <name>` | Switch persona and start a new session |
 | `/skill search <query>` | Search public skills on ClawHub |
 | `/skill install <slug>` | Install a ClawHub skill into the active workspace |
-| `/skill uninstall <slug>` | Remove a ClawHub-managed skill from the active workspace |
+| `/skill uninstall <slug>` | Remove a locally installed workspace skill from the active workspace |
 | `/skill list` | List ClawHub-managed skills in the active workspace |
 | `/skill update` | Update all ClawHub-managed skills in the active workspace |
 | `/mcp [list]` | List configured MCP servers and registered MCP tools |
@@ -1616,10 +1616,20 @@ These commands are available inside chats handled by `nanobot agent` or `nanobot
 `~/.nanobot/workspace` path. If you start nanobot with `--workspace`, skill install/uninstall/list/update
 operate on that workspace's `skills/` directory.
 
+`/skill search` queries the live ClawHub registry API directly at
+`https://lightmake.site/api/skills` using the same sort order as the SkillHub web UI, so search
+does not depend on `npm` or `npx`.
+
+For `install`, `list`, and `update`, nanobot still shells out to `npx clawhub@latest`
+using ClawHub global options first: `--workdir <workspace> --no-input ...`. `/skill uninstall`
+removes the local `<workspace>/skills/<slug>` directory directly and best-effort prunes
+`<workspace>/.clawhub/lock.json`, because current ClawHub docs do not document an uninstall
+subcommand.
+
 `/skill search` can legitimately return no matches. In that case nanobot now replies with a
 clear "no skills found" message instead of leaving the channel on a transient searching state.
-If `npx clawhub@latest` cannot reach the npm registry, nanobot also surfaces the registry/network
-error directly so the failure is visible to the user.
+If the ClawHub registry API or `npx clawhub@latest` cannot be reached, nanobot also surfaces the
+underlying network or HTTP error directly so the failure is visible to the user.
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>

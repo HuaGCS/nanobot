@@ -40,8 +40,10 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - `channels.voiceReply` currently adds TTS attachments on supported outbound channels such as Telegram, and QQ when the configured TTS endpoint returns `silk`. Preserve plain-text fallback when QQ voice requirements are not met.
 - Voice replies should follow the active session persona. Build TTS style instructions from the resolved persona's prompt files, and allow optional persona-local overrides from `VOICE.json` under the persona workspace (`<workspace>/VOICE.json` for default, `<workspace>/personas/<name>/VOICE.json` for custom personas).
 - `channels.voiceReply.url` may override the TTS endpoint independently of the chat model provider. When omitted, fall back to the active conversation provider URL. Keep `apiBase` accepted as a compatibility alias.
-- `/skill` shells out to `npx clawhub@latest`; it requires Node.js/`npx` at runtime.
-- `/skill uninstall` runs in a non-interactive context, so keep passing `--yes` when shelling out to ClawHub.
+- `/skill search` queries `https://lightmake.site/api/skills` directly with SkillHub-compatible query params (`page`, `pageSize`, `sortBy`, `order`, `keyword`) and does not require Node.js.
+- `/skill` shells out to `npx clawhub@latest` for `install`, `list`, and `update`; those subcommands still require Node.js/`npx` at runtime.
+- Keep ClawHub global options first when shelling out: `--workdir <workspace> --no-input ...`.
+- `/skill uninstall` is local workspace cleanup, not a ClawHub subprocess call. Remove `<workspace>/skills/<slug>` and best-effort prune `<workspace>/.clawhub/lock.json`.
 - Treat empty `/skill search` output as a user-visible "no results" case rather than a silent success. Surface npm/registry failures directly to the user.
 - Never hardcode `~/.nanobot/workspace` for skill installation or lookup. Use the active runtime workspace from config or `--workspace`.
 - Workspace skills in `<workspace>/skills/` take precedence over built-in skills with the same directory name.

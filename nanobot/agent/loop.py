@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
 import sys
 import tempfile
 import time
@@ -15,14 +14,17 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot import __version__
+from nanobot.agent.commands import (
+    LanguageCommandHandler,
+    MCPCommandHandler,
+    PersonaCommandHandler,
+    SkillCommandHandler,
+    SystemCommandHandler,
+    build_agent_command_router,
+)
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.i18n import (
     DEFAULT_LANGUAGE,
-    help_lines,
-    language_label,
-    list_languages,
-    normalize_language_code,
     resolve_language,
     text,
 )
@@ -39,10 +41,11 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.command.router import CommandContext
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.speech import OpenAISpeechProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import build_status_content, ensure_dir, safe_filename
+from nanobot.utils.helpers import ensure_dir, safe_filename
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -74,6 +77,14 @@ class AgentLoop:
         "network request failed",
         "registry.npmjs.org",
     )
+    _CLAWHUB_CACHE_ERROR_MARKERS = (
+        "err_module_not_found",
+        "cannot find module",
+        "cannot find package",
+    )
+    _CLAWHUB_SEARCH_API_URL = "https://lightmake.site/api/skills"
+    _CLAWHUB_SEARCH_TIMEOUT_SECONDS = 15.0
+    _CLAWHUB_SEARCH_LIMIT = 5
     _CLAWHUB_NPM_CACHE_DIR = Path(tempfile.gettempdir()) / "nanobot-npm-cache"
     _PREFLIGHT_CONSOLIDATION_BUDGET_SECONDS = 1.5
 
@@ -117,6 +128,14 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
+        self._clawhub_lock = asyncio.Lock()
+        self._clawhub_npm_cache_dir = self._CLAWHUB_NPM_CACHE_DIR / str(os.getpid())
+        self._language_commands = LanguageCommandHandler(self)
+        self._mcp_commands = MCPCommandHandler(self)
+        self._persona_commands = PersonaCommandHandler(self)
+        self._skill_commands = SkillCommandHandler(self)
+        self._system_commands = SystemCommandHandler(self)
+        self._command_router = build_agent_command_router()
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -164,12 +183,6 @@ class AgentLoop:
         )
         self._register_default_tools()
 
-    @staticmethod
-    def _command_name(content: str) -> str:
-        """Return the normalized slash command name."""
-        parts = content.strip().split(None, 1)
-        return parts[0].lower() if parts else ""
-
     def _get_session_persona(self, session: Session) -> str:
         """Return the active persona name for a session."""
         return self.context.resolve_persona(session.metadata.get("persona"))
@@ -213,23 +226,6 @@ class AgentLoop:
     def _mcp_usage(self, language: str) -> str:
         """Return MCP command help text."""
         return text(language, "mcp_usage")
-
-    def _group_mcp_tool_names(self) -> dict[str, list[str]]:
-        """Group registered MCP tool names by configured server name."""
-        grouped = {name: [] for name in self._mcp_servers}
-        server_names = sorted(self._mcp_servers, key=len, reverse=True)
-
-        for tool_name in self.tools.tool_names:
-            if not tool_name.startswith("mcp_"):
-                continue
-
-            for server_name in server_names:
-                prefix = f"mcp_{server_name}_"
-                if tool_name.startswith(prefix):
-                    grouped[server_name].append(tool_name.removeprefix(prefix))
-                    break
-
-        return {name: sorted(tools) for name, tools in grouped.items()}
 
     def _remove_registered_mcp_tools(self) -> None:
         """Remove all dynamically registered MCP tools from the registry."""
@@ -368,176 +364,86 @@ class AgentLoop:
         await self._reload_runtime_config_if_needed(force=force)
 
     @staticmethod
-    def _decode_subprocess_output(data: bytes) -> str:
-        """Decode subprocess output conservatively for CLI surfacing."""
-        return data.decode("utf-8", errors="replace").strip()
+    def _skill_subcommand(parts: list[str]) -> str | None:
+        if len(parts) < 2:
+            return None
+        return parts[1].lower()
 
-    @classmethod
-    def _is_clawhub_network_error(cls, output: str) -> bool:
-        lowered = output.lower()
-        return any(marker in lowered for marker in cls._CLAWHUB_NETWORK_ERROR_MARKERS)
+    @staticmethod
+    def _skill_search_query(content: str) -> str | None:
+        query_parts = content.strip().split(None, 2)
+        if len(query_parts) < 3:
+            return None
+        query = query_parts[2].strip()
+        return query or None
 
-    def _format_clawhub_error(self, language: str, code: int, output: str) -> str:
-        if output and self._is_clawhub_network_error(output):
-            return "\n\n".join([text(language, "skill_command_network_failed"), output])
-        return output or text(language, "skill_command_failed", code=code)
+    @staticmethod
+    def _skill_argument(parts: list[str]) -> str | None:
+        if len(parts) < 3:
+            return None
+        value = parts[2].strip()
+        return value or None
 
-    def _clawhub_env(self) -> dict[str, str]:
-        """Configure npm so ClawHub fails fast and uses a writable cache directory."""
-        env = os.environ.copy()
-        env.setdefault("NO_COLOR", "1")
-        env.setdefault("FORCE_COLOR", "0")
-        env.setdefault("npm_config_cache", str(self._CLAWHUB_NPM_CACHE_DIR))
-        env.setdefault("npm_config_update_notifier", "false")
-        env.setdefault("npm_config_audit", "false")
-        env.setdefault("npm_config_fund", "false")
-        env.setdefault("npm_config_fetch_retries", "0")
-        env.setdefault("npm_config_fetch_timeout", "5000")
-        env.setdefault("npm_config_fetch_retry_mintimeout", "1000")
-        env.setdefault("npm_config_fetch_retry_maxtimeout", "5000")
-        return env
-
-    async def _run_clawhub(
-        self, language: str, *args: str, timeout_seconds: int | None = None,
-    ) -> tuple[int, str]:
-        """Run the ClawHub CLI and return (exit_code, combined_output)."""
-        npx = shutil.which("npx")
-        if not npx:
-            return 127, text(language, "skill_npx_missing")
-
-        env = self._clawhub_env()
-
-        proc = None
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                npx,
-                "--yes",
-                "clawhub@latest",
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_seconds or self._CLAWHUB_TIMEOUT_SECONDS,
-            )
-        except FileNotFoundError:
-            return 127, text(language, "skill_npx_missing")
-        except asyncio.TimeoutError:
-            if proc is not None and proc.returncode is None:
-                proc.kill()
-                await proc.communicate()
-            return 124, text(language, "skill_command_timeout")
-        except asyncio.CancelledError:
-            if proc is not None and proc.returncode is None:
-                proc.kill()
-                await proc.communicate()
-            raise
-
-        output_parts = [
-            self._decode_subprocess_output(stdout),
-            self._decode_subprocess_output(stderr),
-        ]
-        output = "\n".join(part for part in output_parts if part).strip()
-        return proc.returncode or 0, output
+    def _command_context(
+        self,
+        msg: InboundMessage,
+        *,
+        session: Session | None = None,
+        key: str | None = None,
+    ) -> CommandContext:
+        return CommandContext(
+            msg=msg,
+            session=session,
+            key=key or msg.session_key,
+            raw=msg.content.strip(),
+            loop=self,
+        )
 
     async def _handle_skill_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
         """Handle ClawHub skill management commands for the active workspace."""
         language = self._get_session_language(session)
         parts = msg.content.strip().split()
-        search_query: str | None = None
-        if len(parts) == 1:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(language, "skill_usage"),
-            )
-
-        subcommand = parts[1].lower()
-        workspace = str(self.workspace)
+        subcommand = self._skill_subcommand(parts)
+        if not subcommand:
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=text(language, "skill_usage"))
 
         if subcommand == "search":
-            query_parts = msg.content.strip().split(None, 2)
-            if len(query_parts) < 3 or not query_parts[2].strip():
+            query = self._skill_search_query(msg.content)
+            if not query:
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=text(language, "skill_search_missing_query"),
                 )
-            search_query = query_parts[2].strip()
-            code, output = await self._run_clawhub(
-                language,
-                "search",
-                search_query,
-                "--limit",
-                "5",
-            )
-        elif subcommand == "install":
-            if len(parts) < 3:
+            return await self._skill_commands.search(msg, language, query)
+
+        if subcommand == "install":
+            slug = self._skill_argument(parts)
+            if not slug:
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=text(language, "skill_install_missing_slug"),
                 )
-            code, output = await self._run_clawhub(
-                language,
-                "install",
-                parts[2],
-                "--workdir",
-                workspace,
-                timeout_seconds=self._CLAWHUB_INSTALL_TIMEOUT_SECONDS,
-            )
-        elif subcommand == "uninstall":
-            if len(parts) < 3:
+            return await self._skill_commands.install(msg, language, slug)
+
+        if subcommand == "uninstall":
+            slug = self._skill_argument(parts)
+            if not slug:
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=text(language, "skill_uninstall_missing_slug"),
                 )
-            code, output = await self._run_clawhub(
-                language,
-                "uninstall",
-                parts[2],
-                "--yes",
-                "--workdir",
-                workspace,
-            )
-        elif subcommand == "list":
-            code, output = await self._run_clawhub(language, "list", "--workdir", workspace)
-        elif subcommand == "update":
-            code, output = await self._run_clawhub(
-                language,
-                "update",
-                "--all",
-                "--workdir",
-                workspace,
-                timeout_seconds=self._CLAWHUB_INSTALL_TIMEOUT_SECONDS,
-            )
-        else:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(language, "skill_usage"),
-            )
+            return await self._skill_commands.uninstall(msg, language, slug)
 
-        if code != 0:
-            content = self._format_clawhub_error(language, code, output)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+        if subcommand == "list":
+            return await self._skill_commands.list(msg, language)
 
-        if subcommand == "search" and not output:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(language, "skill_search_no_results", query=search_query or ""),
-            )
+        if subcommand == "update":
+            return await self._skill_commands.update(msg, language)
 
-        notes: list[str] = []
-        if output:
-            notes.append(output)
-        if subcommand in {"install", "uninstall", "update"}:
-            notes.append(text(language, "skill_applied_to_workspace", workspace=workspace))
-        content = "\n\n".join(notes) if notes else text(language, "skill_command_completed", command=subcommand)
-        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=text(language, "skill_usage"))
 
     async def _handle_mcp_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
         """Handle MCP inspection commands."""
@@ -551,37 +457,7 @@ class AgentLoop:
                 content=self._mcp_usage(language),
             )
 
-        await self._reload_mcp_servers_if_needed()
-
-        if not self._mcp_servers:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(language, "mcp_no_servers"),
-            )
-
-        await self._connect_mcp()
-
-        server_lines = "\n".join(f"- {name}" for name in self._mcp_servers)
-        sections = [text(language, "mcp_servers_list", items=server_lines)]
-
-        grouped_tools = self._group_mcp_tool_names()
-        tool_lines = "\n".join(
-            f"- {server}: {', '.join(tools)}"
-            for server, tools in grouped_tools.items()
-            if tools
-        )
-        sections.append(
-            text(language, "mcp_tools_list", items=tool_lines)
-            if tool_lines
-            else text(language, "mcp_no_tools")
-        )
-
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content="\n\n".join(sections),
-        )
+        return await self._mcp_commands.list(msg, language)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -660,28 +536,6 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
-
-    def _status_response(self, msg: InboundMessage, session: Session) -> OutboundMessage:
-        """Build an outbound status message for a session."""
-        ctx_est = 0
-        try:
-            ctx_est, _ = self.memory_consolidator.estimate_session_prompt_tokens(session)
-        except Exception:
-            pass
-        if ctx_est <= 0:
-            ctx_est = self._last_usage.get("prompt_tokens", 0)
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=build_status_content(
-                version=__version__, model=self.model,
-                start_time=self._start_time, last_usage=self._last_usage,
-                context_window_tokens=self.context_window_tokens,
-                session_msg_count=len(session.get_history(max_messages=0)),
-                context_tokens_estimate=ctx_est,
-            ),
-            metadata={"render_as": "text"},
-        )
 
     @staticmethod
     def _voice_reply_extension(response_format: str) -> str:
@@ -972,14 +826,14 @@ class AgentLoop:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
                 continue
 
-            cmd = self._command_name(msg.content)
-            if cmd == "/stop":
-                await self._handle_stop(msg)
-            elif cmd == "/restart":
-                await self._handle_restart(msg)
-            elif cmd == "/status":
-                session = self.sessions.get_or_create(msg.session_key)
-                await self.bus.publish_outbound(self._status_response(msg, session))
+            ctx = self._command_context(
+                msg,
+                session=self.sessions.get_or_create(msg.session_key),
+            )
+            if self._command_router.is_priority(ctx.raw):
+                result = await self._command_router.dispatch_priority(ctx)
+                if result is not None:
+                    await self.bus.publish_outbound(result)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
@@ -1069,27 +923,14 @@ class AgentLoop:
 
     async def _handle_language_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
         """Handle session-scoped language switching commands."""
-        current = self._get_session_language(session)
         parts = msg.content.strip().split()
+        current = self._get_session_language(session)
         if len(parts) == 1 or parts[1].lower() == "current":
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(current, "current_language", language_name=language_label(current, current)),
-            )
+            return self._language_commands.current(msg, session)
 
         subcommand = parts[1].lower()
         if subcommand == "list":
-            items = "\n".join(
-                f"- {language_label(code, current)}"
-                + (f" ({text(current, 'current_marker')})" if code == current else "")
-                for code in list_languages()
-            )
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(current, "available_languages", items=items),
-            )
+            return self._language_commands.list(msg, session)
 
         if subcommand != "set" or len(parts) < 3:
             return OutboundMessage(
@@ -1098,55 +939,18 @@ class AgentLoop:
                 content=self._language_usage(current),
             )
 
-        target = normalize_language_code(parts[2])
-        if target is None:
-            languages = ", ".join(language_label(code, current) for code in list_languages())
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(current, "unknown_language", name=parts[2], languages=languages),
-            )
-
-        if target == current:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(current, "language_already_active", language_name=language_label(target, current)),
-            )
-
-        self._set_session_language(session, target)
-        self.sessions.save(session)
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=text(target, "switched_language", language_name=language_label(target, target)),
-        )
+        return self._language_commands.set(msg, session, parts[2])
 
     async def _handle_persona_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
         """Handle session-scoped persona management commands."""
         language = self._get_session_language(session)
         parts = msg.content.strip().split()
         if len(parts) == 1 or parts[1].lower() == "current":
-            current = self._get_session_persona(session)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(language, "current_persona", persona=current),
-            )
+            return self._persona_commands.current(msg, session)
 
         subcommand = parts[1].lower()
         if subcommand == "list":
-            current = self._get_session_persona(session)
-            marker = text(language, "current_marker")
-            personas = [
-                f"{name} ({marker})" if name == current else name
-                for name in self.context.list_personas()
-            ]
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(language, "available_personas", items="\n".join(f"- {name}" for name in personas)),
-            )
+            return self._persona_commands.list(msg, session)
 
         if subcommand != "set" or len(parts) < 3:
             return OutboundMessage(
@@ -1155,53 +959,7 @@ class AgentLoop:
                 content=self._persona_usage(language),
             )
 
-        target = self.context.find_persona(parts[2])
-        if target is None:
-            personas = ", ".join(self.context.list_personas())
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(
-                    language,
-                    "unknown_persona",
-                    name=parts[2],
-                    personas=personas,
-                    path=self.workspace / "personas" / parts[2],
-                ),
-            )
-
-        current = self._get_session_persona(session)
-        if target == current:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(language, "persona_already_active", persona=target),
-            )
-
-        try:
-            if not await self.memory_consolidator.archive_unconsolidated(session):
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=text(language, "memory_archival_failed_persona"),
-                )
-        except Exception:
-            logger.exception("/persona archival failed for {}", session.key)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=text(language, "memory_archival_failed_persona"),
-            )
-
-        session.clear()
-        self._set_session_persona(session, target)
-        self.sessions.save(session)
-        self.sessions.invalidate(session.key)
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=text(language, "switched_persona", persona=target),
-        )
+        return await self._persona_commands.set(msg, session, parts[2])
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
@@ -1320,35 +1078,11 @@ class AgentLoop:
         language = self._get_session_language(session)
 
         # Slash commands
-        cmd = self._command_name(msg.content)
-        if cmd == "/new":
-            snapshot = session.messages[session.last_consolidated:]
-            session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
-
-            if snapshot:
-                self._schedule_background(self.memory_consolidator.archive_messages(session, snapshot))
-
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content=text(language, "new_session_started"))
-        if cmd == "/status":
-            return self._status_response(msg, session)
-        if cmd in {"/lang", "/language"}:
-            return await self._handle_language_command(msg, session)
-        if cmd == "/persona":
-            return await self._handle_persona_command(msg, session)
-        if cmd == "/skill":
-            return await self._handle_skill_command(msg, session)
-        if cmd == "/mcp":
-            return await self._handle_mcp_command(msg, session)
-        if cmd == "/help":
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="\n".join(help_lines(language)),
-                metadata={"render_as": "text"},
-            )
+        slash_response = await self._command_router.dispatch(
+            self._command_context(msg, session=session, key=key)
+        )
+        if slash_response is not None:
+            return slash_response
         await self._connect_mcp()
         await self._run_preflight_token_consolidation(session)
 
