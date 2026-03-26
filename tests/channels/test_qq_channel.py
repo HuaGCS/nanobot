@@ -15,6 +15,7 @@ if not QQ_AVAILABLE:
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import NonRetriableSendError
 from nanobot.channels.qq import QQChannel, _make_bot_class
 from nanobot.config.schema import QQConfig
 
@@ -151,6 +152,42 @@ async def test_send_c2c_message_uses_plain_text_c2c_api_with_msg_seq() -> None:
         "msg_seq": 2,
     }
     assert not channel._client.api.group_calls
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_client_not_initialized() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
+
+    with pytest.raises(NonRetriableSendError, match="QQ client not initialized"):
+        await channel.send(
+            OutboundMessage(
+                channel="qq",
+                chat_id="user123",
+                content="hello",
+                metadata={"message_id": "msg1"},
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_text_delivery_fails() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
+    channel._client = _FakeClient()
+
+    async def _boom(**kwargs) -> None:  # noqa: ARG001
+        raise RuntimeError("send failed")
+
+    channel._client.api.post_c2c_message = _boom
+
+    with pytest.raises(RuntimeError, match="send failed"):
+        await channel.send(
+            OutboundMessage(
+                channel="qq",
+                chat_id="user123",
+                content="hello",
+                metadata={"message_id": "msg1"},
+            )
+        )
 
 
 @pytest.mark.asyncio

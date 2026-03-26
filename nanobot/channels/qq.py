@@ -15,7 +15,7 @@ from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
+from nanobot.channels.base import BaseChannel, NonRetriableSendError
 from nanobot.config.schema import QQConfig, QQInstanceConfig
 from nanobot.security.network import validate_url_target
 from nanobot.utils.delivery import delivery_artifacts_root, is_image_file
@@ -268,7 +268,7 @@ class QQChannel(BaseChannel):
     ) -> None:
         """Upload a local QQ rich-media file using file_data."""
         if not self._client or Route is None:
-            raise RuntimeError("QQ client not initialized")
+            raise NonRetriableSendError("QQ client not initialized")
 
         payload = {
             "file_type": file_type,
@@ -361,8 +361,7 @@ class QQChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through QQ."""
         if not self._client:
-            logger.warning("QQ client not initialized")
-            return
+            raise NonRetriableSendError("QQ client not initialized")
 
         try:
             msg_id = msg.metadata.get("message_id")
@@ -445,6 +444,7 @@ class QQChannel(BaseChannel):
                 await self._post_text_message(msg.chat_id, msg_type, "\n".join(text_parts), msg_id)
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
+            raise
 
     async def _on_message(self, data: "C2CMessage | GroupMessage", is_group: bool = False) -> None:
         """Handle incoming message from QQ."""

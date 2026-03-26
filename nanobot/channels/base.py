@@ -12,6 +12,10 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 
 
+class NonRetriableSendError(RuntimeError):
+    """Delivery failure that should not enter the manager retry loop."""
+
+
 class BaseChannel(ABC):
     """
     Abstract base class for chat channel implementations.

@@ -10,7 +10,7 @@ from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
+from nanobot.channels.base import BaseChannel, NonRetriableSendError
 from nanobot.config.schema import Config
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
@@ -223,6 +223,12 @@ class ChannelManager:
                 return  # Send succeeded
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
+            except NonRetriableSendError as e:
+                logger.error(
+                    "Failed to send to {} without retry: {} - {}",
+                    msg.channel, type(e).__name__, e
+                )
+                return
             except Exception as e:
                 if attempt == max_attempts - 1:
                     logger.error(

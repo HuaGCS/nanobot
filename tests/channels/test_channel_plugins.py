@@ -10,7 +10,7 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
+from nanobot.channels.base import BaseChannel, NonRetriableSendError
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import ChannelsConfig
 
@@ -416,6 +416,46 @@ async def test_send_with_retry_no_retry_when_max_is_zero():
         await mgr._send_with_retry(mgr.channels["failing"], msg)
 
     assert call_count == 1  # Called once but no retry (max(0, 1) = 1)
+
+
+@pytest.mark.asyncio
+async def test_send_with_retry_skips_retry_for_non_retriable_error():
+    """_send_with_retry should not retry state/config errors marked as non-retriable."""
+    call_count = 0
+
+    class _FailingChannel(BaseChannel):
+        name = "failing"
+        display_name = "Failing"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            nonlocal call_count
+            call_count += 1
+            raise NonRetriableSendError("client not initialized")
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    msg = OutboundMessage(channel="failing", chat_id="123", content="test")
+
+    with patch("nanobot.channels.manager.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        await mgr._send_with_retry(mgr.channels["failing"], msg)
+
+    assert call_count == 1
+    mock_sleep.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -878,4 +918,3 @@ async def test_start_all_creates_dispatch_task():
 
     # Dispatch task should have been created
     assert mgr._dispatch_task is not None
-
