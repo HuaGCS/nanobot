@@ -1,4 +1,6 @@
 import asyncio
+import copy
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -228,3 +230,173 @@ async def test_slow_preflight_consolidation_continues_in_background(tmp_path, mo
     await loop.close_mcp()
 
     assert "consolidate-end" in order
+
+
+@pytest.mark.asyncio
+async def test_large_tool_results_are_compacted_before_next_llm_call(tmp_path, monkeypatch) -> None:
+    from nanobot.providers.base import GenerationSettings, ToolCallRequest
+
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "memory" / "MEMORY.md").write_text("persisted memory", encoding="utf-8")
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=512)
+
+    def estimate(messages, tools, model):
+        payload = json.dumps({"messages": messages, "tools": tools, "model": model}, ensure_ascii=False)
+        return (len(payload) // 2, "test-counter")
+
+    provider.estimate_prompt_tokens = estimate
+
+    captured_second_call: list[dict] = []
+    call_count = {"n": 0}
+
+    async def scripted_chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="use tool",
+                tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+            )
+        captured_second_call[:] = messages
+        return LLMResponse(content="done", tool_calls=[])
+
+    provider.chat_with_retry = scripted_chat_with_retry
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        context_window_tokens=20_000,
+    )
+
+    async def fake_execute(_self, _name, _arguments):
+        return "x" * 40_000
+
+    monkeypatch.setattr("nanobot.agent.tools.registry.ToolRegistry.execute", fake_execute)
+
+    response = await loop.process_direct("remember and continue", session_key="cli:test")
+
+    assert response is not None
+    assert response.content == "done"
+    assert captured_second_call[0]["role"] == "system"
+    assert "persisted memory" in captured_second_call[0]["content"]
+
+    tool_messages = [msg for msg in captured_second_call if msg.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    assert isinstance(tool_messages[0]["content"], str)
+    assert len(tool_messages[0]["content"]) < 40_000
+    assert "truncated" in tool_messages[0]["content"] or "omitted" in tool_messages[0]["content"]
+
+    estimated, _ = provider.estimate_prompt_tokens(
+        captured_second_call,
+        loop.tools.get_definitions(),
+        loop.model,
+    )
+    assert estimated <= loop._prompt_budget_tokens()
+
+
+@pytest.mark.asyncio
+async def test_multi_step_tool_turn_keeps_memory_and_recent_context(tmp_path, monkeypatch) -> None:
+    from nanobot.providers.base import GenerationSettings, ToolCallRequest
+
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "memory" / "MEMORY.md").write_text(
+        "- Project codename: Atlas\n- Always prefer long-term memory facts\n",
+        encoding="utf-8",
+    )
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=512)
+
+    def estimate(messages, tools, model):
+        payload = json.dumps(
+            {"messages": messages, "tools": tools, "model": model},
+            ensure_ascii=False,
+        )
+        return (len(payload) // 2, "test-counter")
+
+    provider.estimate_prompt_tokens = estimate
+
+    captured_calls: list[list[dict]] = []
+    call_count = {"n": 0}
+
+    async def scripted_chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="first tool",
+                tool_calls=[ToolCallRequest(id="call_1", name="search_docs", arguments={"query": "atlas"})],
+            )
+        if call_count["n"] == 2:
+            captured_calls.append(copy.deepcopy(messages))
+            return LLMResponse(
+                content="second tool",
+                tool_calls=[ToolCallRequest(id="call_2", name="scan_repo", arguments={"path": "."})],
+            )
+        captured_calls.append(copy.deepcopy(messages))
+        return LLMResponse(content="done", tool_calls=[])
+
+    provider.chat_with_retry = scripted_chat_with_retry
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        context_window_tokens=26_000,
+    )
+
+    async def fake_execute(_self, name, _arguments):
+        if name == "search_docs":
+            return "TOOL_A:" + ("a" * 30_000)
+        if name == "scan_repo":
+            return "TOOL_B:" + ("b" * 30_000)
+        return "unexpected"
+
+    monkeypatch.setattr("nanobot.agent.tools.registry.ToolRegistry.execute", fake_execute)
+
+    response = await loop.process_direct("Use the remembered Atlas facts and inspect the repo", session_key="cli:test")
+
+    assert response is not None
+    assert response.content == "done"
+    assert len(captured_calls) == 2
+
+    second_call, third_call = captured_calls
+    assert second_call[0]["role"] == "system"
+    assert "Project codename: Atlas" in second_call[0]["content"]
+    assert "Project codename: Atlas" in third_call[0]["content"]
+
+    second_tool_messages = [msg for msg in second_call if msg.get("role") == "tool"]
+    third_tool_messages = [msg for msg in third_call if msg.get("role") == "tool"]
+    assert len(second_tool_messages) == 1
+    assert len(third_tool_messages) == 2
+
+    older_tool = next(msg for msg in third_tool_messages if msg.get("name") == "search_docs")
+    newer_tool = next(msg for msg in third_tool_messages if msg.get("name") == "scan_repo")
+    assert isinstance(older_tool["content"], str)
+    assert isinstance(newer_tool["content"], str)
+    assert older_tool["content"].startswith("TOOL_A:")
+    assert newer_tool["content"].startswith("TOOL_B:")
+    assert len(second_tool_messages[0]["content"]) > 25_000
+    assert len(older_tool["content"]) < len(second_tool_messages[0]["content"])
+    assert len(older_tool["content"]) < len(newer_tool["content"])
+
+    assistant_tool_turns = [
+        msg for msg in third_call
+        if msg.get("role") == "assistant" and msg.get("tool_calls")
+    ]
+    assert [turn["tool_calls"][0]["function"]["name"] for turn in assistant_tool_turns] == [
+        "search_docs",
+        "scan_repo",
+    ]
+
+    estimated, _ = provider.estimate_prompt_tokens(
+        third_call,
+        loop.tools.get_definitions(),
+        loop.model,
+    )
+    assert estimated <= loop._prompt_budget_tokens()

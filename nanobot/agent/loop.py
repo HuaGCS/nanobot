@@ -45,7 +45,7 @@ from nanobot.command.router import CommandContext
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.speech import OpenAISpeechProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import ensure_dir, safe_filename
+from nanobot.utils.helpers import ensure_dir, estimate_prompt_tokens_chain, safe_filename
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -87,6 +87,9 @@ class AgentLoop:
     _CLAWHUB_SEARCH_LIMIT = 5
     _CLAWHUB_NPM_CACHE_DIR = Path(tempfile.gettempdir()) / "nanobot-npm-cache"
     _PREFLIGHT_CONSOLIDATION_BUDGET_SECONDS = 1.5
+    _CONTEXT_TOOL_RESULT_CHAR_STEPS = (16_000, 8_000, 4_000, 2_000, 1_000, 500, 200, 0)
+    _CONTEXT_TOOL_RESULT_OMIT = "[tool result omitted to stay within context window]"
+    _CONTEXT_TOOL_RESULT_SUFFIX = "\n... (truncated to stay within context window)"
 
     def __init__(
         self,
@@ -316,6 +319,7 @@ class AgentLoop:
             self.provider.default_model = self.model
         self.memory_consolidator.model = self.model
         self.memory_consolidator.context_window_tokens = self.context_window_tokens
+        self.memory_consolidator.max_completion_tokens = defaults.max_tokens
         self.subagents.apply_runtime_config(
             model=self.model,
             brave_api_key=self.brave_api_key,
@@ -713,17 +717,18 @@ class AgentLoop:
             iteration += 1
 
             tool_defs = self.tools.get_definitions()
+            request_messages = self._prepare_request_messages(messages, tool_defs)
 
             if on_stream:
                 response = await self.provider.chat_stream_with_retry(
-                    messages=messages,
+                    messages=request_messages,
                     tools=tool_defs,
                     model=self.model,
                     on_content_delta=_filtered_stream,
                 )
             else:
                 response = await self.provider.chat_with_retry(
-                    messages=messages,
+                    messages=request_messages,
                     tools=tool_defs,
                     model=self.model,
                 )
@@ -1225,6 +1230,120 @@ class AgentLoop:
             filtered.append(block)
 
         return filtered
+
+    def _prompt_budget_tokens(self) -> int:
+        """Return the safe prompt-token budget after reserving completion headroom."""
+        max_completion = getattr(
+            getattr(self, "memory_consolidator", None),
+            "max_completion_tokens",
+            getattr(getattr(self.provider, "generation", None), "max_tokens", 4096),
+        )
+        safety = getattr(getattr(self, "memory_consolidator", None), "_SAFETY_BUFFER", 1024)
+        return max(0, int(self.context_window_tokens) - int(max_completion) - int(safety))
+
+    def _truncate_prompt_text(self, text: str, max_chars: int) -> str:
+        """Trim text for in-flight prompt compaction."""
+        if max_chars <= 0:
+            return self._CONTEXT_TOOL_RESULT_OMIT
+        if len(text) <= max_chars:
+            return text
+        if max_chars <= len(self._CONTEXT_TOOL_RESULT_SUFFIX):
+            return text[:max_chars]
+        return text[: max_chars - len(self._CONTEXT_TOOL_RESULT_SUFFIX)] + self._CONTEXT_TOOL_RESULT_SUFFIX
+
+    def _compact_tool_result_for_prompt(self, content: Any, max_chars: int) -> Any:
+        """Compact a tool result just enough to keep the current turn within budget."""
+        if max_chars <= 0:
+            return self._CONTEXT_TOOL_RESULT_OMIT
+
+        if isinstance(content, str):
+            return self._truncate_prompt_text(content, max_chars)
+
+        if isinstance(content, list):
+            remaining = max_chars
+            compacted: list[dict[str, Any]] = []
+            for block in self._sanitize_persisted_blocks(content):
+                if remaining <= 0:
+                    break
+                if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+                    text = block["text"]
+                    trimmed = self._truncate_prompt_text(text, remaining)
+                    compacted.append({**block, "text": trimmed})
+                    remaining -= len(trimmed)
+                    if trimmed != text:
+                        break
+                    continue
+
+                raw = json.dumps(block, ensure_ascii=False)
+                trimmed = self._truncate_prompt_text(raw, remaining)
+                compacted.append({"type": "text", "text": trimmed})
+                remaining -= len(trimmed)
+                if trimmed != raw:
+                    break
+
+            return compacted or [{"type": "text", "text": self._CONTEXT_TOOL_RESULT_OMIT}]
+
+        if content is None:
+            return None
+        return self._truncate_prompt_text(json.dumps(content, ensure_ascii=False), max_chars)
+
+    def _prepare_request_messages(
+        self,
+        messages: list[dict[str, Any]],
+        tool_defs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Shrink older tool results on demand so system prompt and recent context still fit."""
+        budget = self._prompt_budget_tokens()
+        if budget <= 0:
+            return messages
+
+        estimated, source = estimate_prompt_tokens_chain(self.provider, self.model, messages, tool_defs)
+        if estimated <= budget:
+            return messages
+
+        tool_indices = [idx for idx, message in enumerate(messages) if message.get("role") == "tool"]
+        if not tool_indices:
+            logger.warning(
+                "Prompt over budget for current turn: {}/{} via {} (no tool results to compact)",
+                estimated,
+                self.context_window_tokens,
+                source,
+            )
+            return messages
+
+        prepared = list(messages)
+        older_indices = tool_indices[:-1] if len(tool_indices) > 1 else tool_indices
+        newest_indices = tool_indices[-1:] if len(tool_indices) > 1 else []
+
+        for indices in (older_indices, newest_indices):
+            for max_chars in self._CONTEXT_TOOL_RESULT_CHAR_STEPS:
+                for idx in indices:
+                    compacted = self._compact_tool_result_for_prompt(messages[idx].get("content"), max_chars)
+                    if compacted == prepared[idx].get("content"):
+                        continue
+                    prepared[idx] = {**prepared[idx], "content": compacted}
+                    estimated, source = estimate_prompt_tokens_chain(
+                        self.provider,
+                        self.model,
+                        prepared,
+                        tool_defs,
+                    )
+                    if estimated <= budget:
+                        logger.info(
+                            "Compacted tool results for current turn: {}/{} via {}",
+                            estimated,
+                            self.context_window_tokens,
+                            source,
+                        )
+                        return prepared
+
+        logger.warning(
+            "Prompt still over budget after tool-result compaction: {}/{} via {}",
+            estimated,
+            self.context_window_tokens,
+            source,
+        )
+        return prepared
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""

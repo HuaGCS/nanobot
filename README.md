@@ -808,10 +808,9 @@ nanobot gateway
 Now send a message to the bot from QQ — it should respond!
 
 Outbound QQ media sends remote `http(s)` images through the QQ rich-media `url` flow directly.
-For local image files, nanobot always tries `file_data` upload first. When `mediaBaseUrl` is
-configured, nanobot also maps the same local file onto that public URL and can fall back to the
-existing URL-only rich-media flow if direct upload fails. Without `mediaBaseUrl`, nanobot still
-attempts direct upload, but there is no URL fallback path. Tools and skills should write
+For local files, nanobot always tries `file_data` upload first and does not fall back to URL-based
+upload for local delivery artifacts. If the final QQ delivery call fails, the channel raises so the
+global `channels.sendMaxRetries` policy can retry the outbound send. Tools and skills should write
 deliverable files under `workspace/out`; QQ accepts only local image files from that directory.
 
 When an agent uses shell/browser tools to create screenshots or other temporary files for delivery,
@@ -1470,7 +1469,8 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 ```
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
-nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `channels.sendProgress`, `channels.sendToolHints`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
+nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
+During long tool-using turns, nanobot now compacts older tool results on demand so the system prompt, long-term memory, and recent working context stay inside the active context window.
 
 
 
