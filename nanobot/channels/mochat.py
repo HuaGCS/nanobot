@@ -340,6 +340,7 @@ class MochatChannel(BaseChannel):
                                      content, msg.reply_to)
         except Exception as e:
             logger.error("Failed to send Mochat message: {}", e)
+            raise
 
     # ---- config / init helpers ---------------------------------------------
 
