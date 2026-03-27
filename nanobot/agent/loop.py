@@ -693,11 +693,6 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
         """
-        messages = initial_messages
-        iteration = 0
-        final_content = None
-        tools_used: list[str] = []
-
         # Wrap on_stream with stateful think-tag filter so downstream
         # consumers (CLI, channels) never see <think> blocks.
         _raw_stream = on_stream
@@ -713,9 +708,17 @@ class AgentLoop:
             if incremental and _raw_stream:
                 await _raw_stream(incremental)
 
-        while iteration < self.max_iterations:
-            iteration += 1
+        async def _wrapped_stream_end(*, resuming: bool = False) -> None:
+            nonlocal _stream_buf
+            if on_stream_end:
+                await on_stream_end(resuming=resuming)
+            _stream_buf = ""
 
+        final_content: str | None = None
+        tools_used: list[str] = []
+        messages = list(initial_messages)
+
+        for iteration in range(1, self.max_iterations + 1):
             tool_defs = self.tools.get_definitions()
             request_messages = self._prepare_request_messages(messages, tool_defs)
 
