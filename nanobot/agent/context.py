@@ -23,6 +23,7 @@ class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
+    OPTIONAL_PERSONA_FILES = ["STYLE.md", "LORE.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
     def __init__(self, workspace: Path, timezone: str | None = None):
@@ -163,7 +164,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         parts = []
         persona_dir = None if persona == DEFAULT_PERSONA else personas_root(self.workspace) / persona
 
-        for filename in self.BOOTSTRAP_FILES:
+        for filename in [*self.BOOTSTRAP_FILES, *self.OPTIONAL_PERSONA_FILES]:
             file_path = self.workspace / filename
             if persona_dir:
                 persona_file = persona_dir / filename

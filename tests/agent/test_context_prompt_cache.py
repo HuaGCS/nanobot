@@ -96,6 +96,8 @@ def test_persona_prompt_uses_persona_overrides_and_memory(tmp_path: Path) -> Non
     persona_dir.mkdir(parents=True)
     (persona_dir / "SOUL.md").write_text("coder soul", encoding="utf-8")
     (persona_dir / "USER.md").write_text("coder user", encoding="utf-8")
+    (persona_dir / "STYLE.md").write_text("coder style", encoding="utf-8")
+    (persona_dir / "LORE.md").write_text("coder lore", encoding="utf-8")
     (persona_dir / "memory").mkdir()
     (persona_dir / "memory" / "MEMORY.md").write_text("coder memory", encoding="utf-8")
 
@@ -106,5 +108,7 @@ def test_persona_prompt_uses_persona_overrides_and_memory(tmp_path: Path) -> Non
     assert "root agents" in prompt
     assert "coder soul" in prompt
     assert "coder user" in prompt
+    assert "coder style" in prompt
+    assert "coder lore" in prompt
     assert "coder memory" in prompt
     assert "root memory" not in prompt

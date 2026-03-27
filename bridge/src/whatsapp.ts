@@ -14,8 +14,11 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import { ProxyAgent as UndiciProxyAgent } from 'undici';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join, basename } from 'path';
 import { randomBytes } from 'crypto';
@@ -44,9 +47,49 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  private static readonly FALLBACK_BAILEYS_VERSION: [number, number, number] = [2, 3000, 1033846690];
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
+  }
+
+  private configuredProxyUrl(): string | undefined {
+    const proxyUrl = process.env.https_proxy || process.env.HTTPS_PROXY ||
+      process.env.http_proxy || process.env.HTTP_PROXY ||
+      process.env.all_proxy || process.env.ALL_PROXY;
+    return proxyUrl?.trim() || undefined;
+  }
+
+  private redactProxyUrl(proxyUrl: string): string {
+    return proxyUrl.replace(/:\/\/([^:@]+):([^@]+)@/, '://$1:***@');
+  }
+
+  private createProxyAgents(proxyUrl: string): { agent: any; fetchAgent: any } | null {
+    try {
+      const agent = proxyUrl.startsWith('socks')
+        ? new SocksProxyAgent(proxyUrl)
+        : new HttpsProxyAgent(proxyUrl);
+      const fetchAgent = new UndiciProxyAgent(proxyUrl);
+      return { agent, fetchAgent };
+    } catch (error) {
+      console.error('Failed to create proxy agent:', error);
+      return null;
+    }
+  }
+
+  private async resolveBaileysVersion(proxyUrl?: string): Promise<[number, number, number]> {
+    try {
+      const { version } = await fetchLatestBaileysVersion();
+      console.log(`Using Baileys version: ${version.join('.')}`);
+      return version;
+    } catch (error) {
+      const fallback = WhatsAppClient.FALLBACK_BAILEYS_VERSION;
+      console.warn(
+        `Falling back to bundled Baileys version ${fallback.join('.')} after version lookup failed${proxyUrl ? ' while proxying' : ''}:`,
+        error,
+      );
+      return fallback;
+    }
   }
 
   private normalizeJid(jid: string | undefined | null): string {
@@ -77,12 +120,16 @@ export class WhatsAppClient {
   async connect(): Promise<void> {
     const logger = pino({ level: 'silent' });
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
-    const { version } = await fetchLatestBaileysVersion();
+    const proxyUrl = this.configuredProxyUrl();
+    const proxyAgents = proxyUrl ? this.createProxyAgents(proxyUrl) : null;
+    const version = await this.resolveBaileysVersion(proxyUrl);
 
-    console.log(`Using Baileys version: ${version.join('.')}`);
+    if (proxyUrl) {
+      console.log(`Using WhatsApp proxy: ${this.redactProxyUrl(proxyUrl)}`);
+    }
 
     // Create socket following OpenClaw's pattern
-    this.sock = makeWASocket({
+    const socketOptions: any = {
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -93,7 +140,14 @@ export class WhatsAppClient {
       browser: ['nanobot', 'cli', VERSION],
       syncFullHistory: false,
       markOnlineOnConnect: false,
-    });
+    };
+
+    if (proxyAgents) {
+      socketOptions.agent = proxyAgents.agent;
+      socketOptions.fetchAgent = proxyAgents.fetchAgent;
+    }
+
+    this.sock = makeWASocket(socketOptions);
 
     // Handle WebSocket errors
     if (this.sock.ws && typeof this.sock.ws.on === 'function') {

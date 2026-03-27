@@ -369,6 +369,7 @@ class VoiceReplyConfig(Base):
 
     enabled: bool = False
     channels: list[str] = Field(default_factory=lambda: ["telegram"])
+    provider: Literal["openai", "edge", "sovits"] = "openai"
     model: str = "gpt-4o-mini-tts"
     voice: str = "alloy"
     instructions: str = ""
@@ -376,6 +377,18 @@ class VoiceReplyConfig(Base):
     response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm", "silk"] = "opus"
     api_key: str = ""
     api_base: str = Field(default="", validation_alias=AliasChoices("apiBase", "url"))
+    edge_voice: str = "zh-CN-XiaoxiaoNeural"
+    edge_rate: str = "+0%"
+    edge_volume: str = "+0%"
+    sovits_api_url: str = "http://127.0.0.1:9880"
+    sovits_refer_wav_path: str = ""
+    sovits_prompt_text: str = ""
+    sovits_prompt_language: str = "zh"
+    sovits_text_language: str = "zh"
+    sovits_cut_punc: str = "，。"
+    sovits_top_k: int = 5
+    sovits_top_p: float = 1.0
+    sovits_temperature: float = 1.0
 
 
 def _coerce_multi_channel_config(
@@ -554,6 +567,18 @@ class ExecToolConfig(Base):
     path_append: str = ""
 
 
+class ImageGenConfig(Base):
+    """Image generation tool configuration."""
+
+    enabled: bool = False
+    api_key: str = ""
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-image-1"
+    proxy: str | None = None
+    timeout: int = 180
+    reference_image: str = ""
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -571,6 +596,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    image_gen: ImageGenConfig = Field(default_factory=ImageGenConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

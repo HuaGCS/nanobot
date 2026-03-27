@@ -644,6 +644,18 @@ def test_agent_passes_web_search_config_to_agent_loop(mock_agent_runtime) -> Non
     assert kwargs["web_search_max_results"] == 7
 
 
+def test_agent_passes_image_gen_config_to_agent_loop(mock_agent_runtime) -> None:
+    mock_agent_runtime["config"].tools.image_gen.enabled = True
+    mock_agent_runtime["config"].tools.image_gen.api_key = "image-key"
+
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    kwargs = mock_agent_runtime["agent_loop_cls"].call_args.kwargs
+    assert kwargs["image_gen_config"].enabled is True
+    assert kwargs["image_gen_config"].api_key == "image-key"
+
+
 def test_heartbeat_retains_recent_messages_by_default():
     config = Config()
 

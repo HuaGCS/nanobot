@@ -1,4 +1,4 @@
-"""OpenAI-compatible text-to-speech provider."""
+"""Speech synthesis providers used by outbound voice replies."""
 
 from __future__ import annotations
 
@@ -85,4 +85,93 @@ class OpenAISpeechProvider:
                 response_format=response_format,
             )
         )
+        return path
+
+
+class EdgeSpeechProvider:
+    """Microsoft Edge TTS provider."""
+
+    def __init__(
+        self,
+        *,
+        voice: str = "zh-CN-XiaoxiaoNeural",
+        rate: str = "+0%",
+        volume: str = "+0%",
+    ) -> None:
+        self.voice = voice
+        self.rate = rate
+        self.volume = volume
+
+    async def synthesize_to_file(self, text: str, *, output_path: str | Path) -> Path:
+        """Synthesize text with Edge TTS into an audio file."""
+        try:
+            import edge_tts
+        except ImportError as exc:  # pragma: no cover - exercised via runtime env
+            raise RuntimeError("edge-tts is not installed. Install it to use provider=edge.") from exc
+
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        communicate = edge_tts.Communicate(
+            text,
+            self.voice,
+            rate=self.rate,
+            volume=self.volume,
+        )
+        await communicate.save(str(path))
+        return path
+
+
+class GPTSoVITSSpeechProvider:
+    """GPT-SoVITS HTTP provider for custom voice cloning."""
+
+    def __init__(
+        self,
+        *,
+        api_url: str = "http://127.0.0.1:9880",
+        refer_wav_path: str = "",
+        prompt_text: str = "",
+        prompt_language: str = "zh",
+        text_language: str = "zh",
+        cut_punc: str = "，。",
+        top_k: int = 5,
+        top_p: float = 1.0,
+        temperature: float = 1.0,
+        speed: float = 1.0,
+    ) -> None:
+        self.api_url = api_url.rstrip("/")
+        self.refer_wav_path = refer_wav_path
+        self.prompt_text = prompt_text
+        self.prompt_language = prompt_language
+        self.text_language = text_language
+        self.cut_punc = cut_punc
+        self.top_k = top_k
+        self.top_p = top_p
+        self.temperature = temperature
+        self.speed = speed
+
+    async def synthesize_to_file(self, text: str, *, output_path: str | Path) -> Path:
+        """Synthesize text with GPT-SoVITS into an audio file."""
+        if not self.refer_wav_path or not self.prompt_text:
+            raise ValueError(
+                "GPT-SoVITS requires refer_wav_path and prompt_text configuration."
+            )
+
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        params = {
+            "text": text,
+            "text_language": self.text_language,
+            "ref_audio_path": self.refer_wav_path,
+            "prompt_text": self.prompt_text,
+            "prompt_language": self.prompt_language,
+            "cut_punc": self.cut_punc,
+            "top_k": self.top_k,
+            "top_p": self.top_p,
+            "temperature": self.temperature,
+            "speed": self.speed,
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(f"{self.api_url}/", params=params)
+            response.raise_for_status()
+            path.write_bytes(response.content)
         return path

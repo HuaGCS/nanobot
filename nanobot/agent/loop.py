@@ -29,11 +29,17 @@ from nanobot.agent.i18n import (
     text,
 )
 from nanobot.agent.memory import MemoryConsolidator
-from nanobot.agent.personas import build_persona_voice_instructions, load_persona_voice_settings
+from nanobot.agent.personas import (
+    build_persona_voice_instructions,
+    load_persona_response_filter_tags,
+    load_persona_voice_settings,
+    strip_tagged_response_content,
+)
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.image_gen import ImageGenTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -43,12 +49,16 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.router import CommandContext
 from nanobot.providers.base import LLMProvider
-from nanobot.providers.speech import OpenAISpeechProvider
+from nanobot.providers.speech import (
+    EdgeSpeechProvider,
+    GPTSoVITSSpeechProvider,
+    OpenAISpeechProvider,
+)
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import ensure_dir, estimate_prompt_tokens_chain, safe_filename
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ImageGenConfig
     from nanobot.cron.service import CronService
 
 
@@ -106,6 +116,7 @@ class AgentLoop:
         web_search_base_url: str | None = None,
         web_search_max_results: int = 5,
         exec_config: ExecToolConfig | None = None,
+        image_gen_config: ImageGenConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -113,7 +124,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, ImageGenConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -128,6 +139,7 @@ class AgentLoop:
         self.web_search_base_url = web_search_base_url
         self.web_search_max_results = web_search_max_results
         self.exec_config = exec_config or ExecToolConfig()
+        self.image_gen_config = image_gen_config or ImageGenConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
@@ -289,6 +301,8 @@ class AgentLoop:
         if web_fetch_tool := self.tools.get("web_fetch"):
             web_fetch_tool.proxy = self.web_proxy
 
+        self._sync_image_gen_tool()
+
     def _apply_runtime_config(self, config) -> bool:
         """Apply hot-reloadable config to the current agent instance."""
         from nanobot.providers.base import GenerationSettings
@@ -302,6 +316,7 @@ class AgentLoop:
         self.max_iterations = defaults.max_tool_iterations
         self.context_window_tokens = defaults.context_window_tokens
         self.exec_config = tools_cfg.exec
+        self.image_gen_config = tools_cfg.image_gen
         self.restrict_to_workspace = tools_cfg.restrict_to_workspace
         self.brave_api_key = search_cfg.api_key or None
         self.web_proxy = web_cfg.proxy or None
@@ -337,6 +352,42 @@ class AgentLoop:
         )
         self._mcp_servers = config.tools.mcp_servers
         return mcp_changed
+
+    def _sync_image_gen_tool(self) -> None:
+        """Register, update, or remove the optional image generation tool."""
+        config = self.image_gen_config
+        existing = self.tools.get("image_gen")
+        if not config.enabled:
+            if existing:
+                self.tools.unregister("image_gen")
+            return
+
+        proxy = config.proxy or self.web_proxy
+        if isinstance(existing, ImageGenTool):
+            existing.update_config(
+                workspace=self.workspace,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                model=config.model,
+                proxy=proxy,
+                timeout=config.timeout,
+                reference_image=config.reference_image,
+                restrict_to_workspace=self.restrict_to_workspace,
+            )
+            return
+
+        self.tools.register(
+            ImageGenTool(
+                workspace=self.workspace,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                model=config.model,
+                proxy=proxy,
+                timeout=config.timeout,
+                reference_image=config.reference_image,
+                restrict_to_workspace=self.restrict_to_workspace,
+            )
+        )
 
     async def _reload_runtime_config_if_needed(self, *, force: bool = False) -> None:
         """Reload hot-reloadable config from the active config file when it changes."""
@@ -490,6 +541,7 @@ class AgentLoop:
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        self._sync_image_gen_tool()
         if self.cron_service:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
@@ -518,12 +570,21 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        persona: str | None = None,
+    ) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+        if image_tool := self.tools.get("image_gen"):
+            if hasattr(image_tool, "set_persona"):
+                image_tool.set_persona(persona)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -532,6 +593,20 @@ class AgentLoop:
             return None
         from nanobot.utils.helpers import strip_think
         return strip_think(text) or None
+
+    def _filter_persona_response(self, text: str | None, persona: str | None) -> str | None:
+        """Apply persona-level response filtering for user-visible output only."""
+        if text is None:
+            return None
+        tags = load_persona_response_filter_tags(self.workspace, persona)
+        if not tags:
+            return text
+        return strip_tagged_response_content(text, tags)
+
+    def _visible_response_text(self, text: str | None, persona: str | None) -> str:
+        """Return the user-visible version of a model response."""
+        clean = self._strip_think(text) or ""
+        return self._filter_persona_response(clean, persona) or ""
 
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
@@ -581,10 +656,11 @@ class AgentLoop:
     def _voice_reply_profile(
         self,
         persona: str | None,
-    ) -> tuple[str, str | None, float | None]:
-        """Resolve voice, instructions, and speed for the active persona."""
+    ) -> dict[str, Any]:
+        """Resolve provider-specific voice settings for the active persona."""
         cfg = getattr(self.channels_config, "voice_reply", None)
         persona_voice = load_persona_voice_settings(self.workspace, persona)
+        provider_name = persona_voice.provider or getattr(cfg, "provider", "openai")
 
         extra_instructions = [
             value.strip()
@@ -599,13 +675,52 @@ class AgentLoop:
             persona,
             extra_instructions=" ".join(extra_instructions) if extra_instructions else None,
         )
-        voice = persona_voice.voice or getattr(cfg, "voice", "alloy")
         speed = (
             persona_voice.speed
             if persona_voice.speed is not None
             else getattr(cfg, "speed", None) if cfg is not None else None
         )
-        return voice, instructions, speed
+        if provider_name == "edge":
+            voice = persona_voice.voice or getattr(cfg, "edge_voice", "zh-CN-XiaoxiaoNeural")
+        else:
+            voice = persona_voice.voice or getattr(cfg, "voice", "alloy")
+
+        return {
+            "provider": provider_name,
+            "voice": voice,
+            "instructions": instructions,
+            "speed": speed,
+            "api_base": persona_voice.api_base or getattr(cfg, "api_base", ""),
+            "rate": persona_voice.rate or getattr(cfg, "edge_rate", "+0%"),
+            "volume": persona_voice.volume or getattr(cfg, "edge_volume", "+0%"),
+            "sovits_api_url": persona_voice.api_base or getattr(cfg, "sovits_api_url", ""),
+            "sovits_refer_wav_path": persona_voice.refer_wav_path
+            or getattr(cfg, "sovits_refer_wav_path", ""),
+            "sovits_prompt_text": persona_voice.prompt_text or getattr(cfg, "sovits_prompt_text", ""),
+            "sovits_prompt_language": persona_voice.prompt_language
+            or getattr(cfg, "sovits_prompt_language", "zh"),
+            "sovits_text_language": persona_voice.text_language
+            or getattr(cfg, "sovits_text_language", "zh"),
+            "sovits_cut_punc": persona_voice.cut_punc or getattr(cfg, "sovits_cut_punc", "，。"),
+            "sovits_top_k": persona_voice.top_k
+            if persona_voice.top_k is not None
+            else getattr(cfg, "sovits_top_k", 5),
+            "sovits_top_p": persona_voice.top_p
+            if persona_voice.top_p is not None
+            else getattr(cfg, "sovits_top_p", 1.0),
+            "sovits_temperature": persona_voice.temperature
+            if persona_voice.temperature is not None
+            else getattr(cfg, "sovits_temperature", 1.0),
+        }
+
+    @staticmethod
+    def _voice_reply_response_format(provider_name: str, configured_format: str) -> str:
+        """Resolve the final output format for the selected voice provider."""
+        if provider_name == "edge":
+            return "mp3"
+        if provider_name == "sovits" and configured_format == "opus":
+            return "wav"
+        return configured_format
 
     async def _maybe_attach_voice_reply(
         self,
@@ -625,22 +740,13 @@ class AgentLoop:
         if cfg is None:
             return outbound
 
-        api_key = (getattr(cfg, "api_key", "") or getattr(self.provider, "api_key", "") or "").strip()
-        if not api_key:
-            logger.warning(
-                "Voice reply enabled for {}, but no TTS api_key is configured",
-                outbound.channel,
-            )
-            return outbound
-
-        api_base = (
-            getattr(cfg, "api_base", "")
-            or getattr(self.provider, "api_base", "")
-            or "https://api.openai.com/v1"
-        ).strip()
-        response_format = getattr(cfg, "response_format", "opus")
+        profile = self._voice_reply_profile(persona)
+        provider_name = profile["provider"]
+        response_format = self._voice_reply_response_format(
+            provider_name,
+            getattr(cfg, "response_format", "opus"),
+        )
         model = getattr(cfg, "model", "gpt-4o-mini-tts")
-        voice, instructions, speed = self._voice_reply_profile(persona)
         media_dir = ensure_dir(self.workspace / "out" / "voice")
         filename = safe_filename(
             f"{outbound.channel}_{outbound.chat_id}_{int(time.time() * 1000)}"
@@ -648,16 +754,52 @@ class AgentLoop:
         output_path = media_dir / filename
 
         try:
-            provider = OpenAISpeechProvider(api_key=api_key, api_base=api_base)
-            await provider.synthesize_to_file(
-                outbound.content,
-                model=model,
-                voice=voice,
-                instructions=instructions,
-                speed=speed,
-                response_format=response_format,
-                output_path=output_path,
-            )
+            if provider_name == "edge":
+                provider = EdgeSpeechProvider(
+                    voice=profile["voice"],
+                    rate=profile["rate"],
+                    volume=profile["volume"],
+                )
+                await provider.synthesize_to_file(outbound.content, output_path=output_path)
+            elif provider_name == "sovits":
+                provider = GPTSoVITSSpeechProvider(
+                    api_url=(profile["sovits_api_url"] or "http://127.0.0.1:9880").strip(),
+                    refer_wav_path=profile["sovits_refer_wav_path"],
+                    prompt_text=profile["sovits_prompt_text"],
+                    prompt_language=profile["sovits_prompt_language"],
+                    text_language=profile["sovits_text_language"],
+                    cut_punc=profile["sovits_cut_punc"],
+                    top_k=profile["sovits_top_k"],
+                    top_p=profile["sovits_top_p"],
+                    temperature=profile["sovits_temperature"],
+                    speed=profile["speed"] or 1.0,
+                )
+                await provider.synthesize_to_file(outbound.content, output_path=output_path)
+            else:
+                api_key = (
+                    getattr(cfg, "api_key", "") or getattr(self.provider, "api_key", "") or ""
+                ).strip()
+                if not api_key:
+                    logger.warning(
+                        "Voice reply enabled for {}, but no TTS api_key is configured",
+                        outbound.channel,
+                    )
+                    return outbound
+                api_base = (
+                    profile["api_base"]
+                    or getattr(self.provider, "api_base", "")
+                    or "https://api.openai.com/v1"
+                ).strip()
+                provider = OpenAISpeechProvider(api_key=api_key, api_base=api_base)
+                await provider.synthesize_to_file(
+                    outbound.content,
+                    model=model,
+                    voice=profile["voice"],
+                    instructions=profile["instructions"],
+                    speed=profile["speed"],
+                    response_format=response_format,
+                    output_path=output_path,
+                )
         except Exception:
             logger.exception(
                 "Failed to synthesize voice reply for {}:{}",
@@ -685,6 +827,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        persona: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -700,10 +843,9 @@ class AgentLoop:
 
         async def _filtered_stream(delta: str) -> None:
             nonlocal _stream_buf
-            from nanobot.utils.helpers import strip_think
-            prev_clean = strip_think(_stream_buf)
+            prev_clean = self._visible_response_text(_stream_buf, persona)
             _stream_buf += delta
-            new_clean = strip_think(_stream_buf)
+            new_clean = self._visible_response_text(_stream_buf, persona)
             incremental = new_clean[len(prev_clean):]
             if incremental and _raw_stream:
                 await _raw_stream(incremental)
@@ -749,7 +891,7 @@ class AgentLoop:
 
                 if on_progress:
                     if not on_stream:
-                        thought = self._strip_think(response.content)
+                        thought = self._visible_response_text(response.content, persona)
                         if thought:
                             await on_progress(thought)
                     tool_hint = self._tool_hint(response.tool_calls)
@@ -796,15 +938,16 @@ class AgentLoop:
                     _stream_buf = ""
 
                 clean = self._strip_think(response.content)
+                visible = self._filter_persona_response(clean, persona)
                 if response.finish_reason == "error":
                     logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
+                    final_content = visible or clean or "Sorry, I encountered an error calling the AI model."
                     break
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
-                final_content = clean
+                final_content = visible or clean
                 break
 
         if final_content is None and iteration >= self.max_iterations:
@@ -1070,7 +1213,12 @@ class AgentLoop:
             language = self._get_session_language(session)
             await self._connect_mcp()
             await self._run_preflight_token_consolidation(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(
+                channel,
+                chat_id,
+                msg.metadata.get("message_id"),
+                persona=persona,
+            )
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
@@ -1085,6 +1233,7 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                persona=persona,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -1115,7 +1264,12 @@ class AgentLoop:
         await self._connect_mcp()
         await self._run_preflight_token_consolidation(session)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(
+            msg.channel,
+            msg.chat_id,
+            msg.metadata.get("message_id"),
+            persona=persona,
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -1146,6 +1300,7 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            persona=persona,
         )
 
         if final_content is None:

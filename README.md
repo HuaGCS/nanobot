@@ -272,11 +272,43 @@ That's it! You have a working AI assistant in 2 minutes.
 
 `baseUrl` can point either to the SearXNG root (for example `http://localhost:8080`) or directly to `/search`.
 
+### Optional: Image Generation
+
+Enable `tools.imageGen` when you want the agent to use the built-in `image_gen` tool.
+
+```json
+{
+  "tools": {
+    "imageGen": {
+      "enabled": true,
+      "apiKey": "your-image-api-key",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-image-1"
+    }
+  }
+}
+```
+
+`image_gen` writes generated files under `<workspace>/out/image_gen` and returns the saved file
+path. To actually deliver that image to the user, the model must then call the `message` tool with
+the returned path in `media`.
+
+If the active persona has `reference_image` or `reference_images` in
+`personas/<name>/.nanobot/st_manifest.json`, the tool also supports:
+
+- `reference_image="__default__"` to use the persona's default reference image
+- `reference_image="__default__:scene"` to use a scene-specific reference such as `beach` or
+  `winter`
+
+You can still provide explicit local reference image paths directly. When
+`tools.restrictToWorkspace` is enabled, those local reference paths must stay inside the workspace.
+
 ### Optional: Voice Replies
 
 Enable `channels.voiceReply` when you want nanobot to attach a synthesized voice reply on
 supported outbound channels such as Telegram. QQ voice replies are also supported when your TTS
-endpoint can return `silk`.
+endpoint can return `silk`. `channels.voiceReply.provider` currently supports `openai`, `edge`,
+and `sovits`.
 
 ```json
 {
@@ -284,6 +316,7 @@ endpoint can return `silk`.
     "voiceReply": {
       "enabled": true,
       "channels": ["telegram"],
+      "provider": "openai",
       "url": "https://your-tts-endpoint.example.com/v1",
       "model": "gpt-4o-mini-tts",
       "voice": "alloy",
@@ -303,6 +336,52 @@ OpenAI-compatible TTS endpoint for this.
 `https://api.openai.com/v1` or directly to an `/audio/speech` endpoint. If omitted, nanobot uses
 the current conversation provider URL. `apiBase` remains supported as a legacy alias.
 
+Provider notes:
+
+- `provider: "openai"` keeps the current OpenAI-compatible TTS flow.
+- `provider: "edge"` uses local `edge-tts` synthesis and ignores API keys. Configure
+  `edgeVoice`, `edgeRate`, and `edgeVolume`.
+- `provider: "sovits"` calls a GPT-SoVITS HTTP endpoint for custom voice cloning. Configure
+  `sovitsApiUrl`, `sovitsReferWavPath`, `sovitsPromptText`, `sovitsPromptLanguage`,
+  `sovitsTextLanguage`, `sovitsCutPunc`, `sovitsTopK`, `sovitsTopP`, and
+  `sovitsTemperature`.
+
+Example `edge` profile:
+
+```json
+{
+  "channels": {
+    "voiceReply": {
+      "enabled": true,
+      "channels": ["telegram"],
+      "provider": "edge",
+      "edgeVoice": "zh-CN-XiaoxiaoNeural",
+      "edgeRate": "+8%",
+      "edgeVolume": "+0%"
+    }
+  }
+}
+```
+
+Example `sovits` profile:
+
+```json
+{
+  "channels": {
+    "voiceReply": {
+      "enabled": true,
+      "channels": ["telegram"],
+      "provider": "sovits",
+      "sovitsApiUrl": "http://127.0.0.1:9880",
+      "sovitsReferWavPath": "/data/voices/aria.wav",
+      "sovitsPromptText": "这是角色参考语音。",
+      "sovitsPromptLanguage": "zh",
+      "sovitsTextLanguage": "zh"
+    }
+  }
+}
+```
+
 Voice replies automatically follow the active session persona. nanobot builds TTS style
 instructions from that persona's `SOUL.md` and `USER.md`, so switching `/persona` changes both the
 text response style and the generated speech style together.
@@ -317,11 +396,27 @@ Example:
 
 ```json
 {
+  "provider": "sovits",
+  "apiBase": "http://127.0.0.1:9880",
   "voice": "nova",
   "instructions": "sound crisp, confident, and slightly faster than normal",
-  "speed": 1.15
+  "speed": 1.15,
+  "referWavPath": "assets/voice/aria.wav",
+  "promptText": "这是角色参考语音。",
+  "promptLanguage": "zh",
+  "textLanguage": "zh"
 }
 ```
+
+`VOICE.json` accepts both snake_case and camelCase keys. Persona overrides can switch provider,
+voice, endpoint, Edge speaking style, or GPT-SoVITS cloning parameters without changing the global
+channel config.
+
+Bundled local companion skills now complement these persona features:
+
+- `living-together`: always-on shared-life image generation guidance using persona reference images
+- `emotional-companion`: empathy, follow-up, and heartbeat-style care prompts
+- `translate`: faithful full-text translation without summarization
 
 ## 💬 Chat Apps
 
@@ -669,6 +764,10 @@ nanobot channels login whatsapp
 > Multi-bot mode is supported with `instances`, but each bot must connect to its own bridge
 > process. Run separate bridge processes with different `BRIDGE_PORT` and `AUTH_DIR`, then point
 > each instance at its own `bridgeUrl`.
+>
+> The local Node.js bridge now honors standard proxy environment variables such as `https_proxy`,
+> `http_proxy`, and `all_proxy`, including SOCKS5 URLs. Export them before running
+> `nanobot channels login whatsapp` when WhatsApp Web access must go through a proxy.
 
 **3. Run** (two terminals)
 
@@ -1469,7 +1568,7 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 ```
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
-nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
+nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
 During long tool-using turns, nanobot now compacts older tool results on demand so the system prompt, long-term memory, and recent working context stay inside the active context window.
 
 
@@ -1486,6 +1585,7 @@ During long tool-using turns, nanobot now compacts older tool results on demand 
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
+| `tools.imageGen.enabled` | `false` | When `true`, registers the built-in `image_gen` tool. Generated images are written under `<workspace>/out/image_gen`. |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 
@@ -1648,11 +1748,72 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
+| `nanobot persona import-st-card <file>` | Import a SillyTavern character card into the active workspace personas |
+| `nanobot persona import-st-preset <file> --persona <name>` | Import a SillyTavern preset into `STYLE.md` for an existing persona |
+| `nanobot persona import-st-worldinfo <file> --persona <name>` | Import SillyTavern world info into `LORE.md` for an existing persona |
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login <channel>` | Authenticate a channel interactively |
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+### Persona Assets
+
+Import a SillyTavern character card into the active workspace persona tree:
+
+```bash
+nanobot persona import-st-card /path/to/aria.json -w ~/.nanobot/workspace
+```
+
+If the persona directory already exists, re-run with `--force` to overwrite the managed import
+files:
+
+```bash
+nanobot persona import-st-card /path/to/aria.json -w ~/.nanobot/workspace --force
+```
+
+The importer writes into `<workspace>/personas/<name>/` and generates:
+
+- `SOUL.md`
+- `USER.md`
+- `memory/MEMORY.md`
+- `memory/HISTORY.md`
+- `.nanobot/st_character.json`
+- `.nanobot/st_manifest.json`
+
+`st_manifest.json` stores normalized import metadata such as `response_filter_tags`. When present,
+those tags are stripped from the final user-visible reply but preserved in saved session history so
+context continuity is not lost.
+
+The same manifest can also define `reference_image` and `reference_images`. When
+`tools.imageGen.enabled` is on, the `image_gen` tool can resolve `__default__` and
+`__default__:scene` against the active persona manifest and write the generated image to
+`<workspace>/out/image_gen`.
+
+Persona workspaces can also include optional `STYLE.md` and `LORE.md`. When present, nanobot loads
+them into the persona system prompt after `SOUL.md` and `USER.md`.
+
+Import a SillyTavern preset into an existing persona:
+
+```bash
+nanobot persona import-st-preset /path/to/preset.json --persona Aria -w ~/.nanobot/workspace
+```
+
+This writes:
+
+- `personas/Aria/STYLE.md`
+- `personas/Aria/.nanobot/st_preset.json`
+
+Import SillyTavern world info into an existing persona:
+
+```bash
+nanobot persona import-st-worldinfo /path/to/worldinfo.json --persona Aria -w ~/.nanobot/workspace
+```
+
+This writes:
+
+- `personas/Aria/LORE.md`
+- `personas/Aria/.nanobot/st_world_info.json`
 
 ### Chat Slash Commands
 

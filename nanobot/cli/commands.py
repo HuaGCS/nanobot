@@ -241,6 +241,10 @@ def main(
     pass
 
 
+persona_app = typer.Typer(help="Manage personas")
+app.add_typer(persona_app, name="persona")
+
+
 # ============================================================================
 # Onboard / Setup
 # ============================================================================
@@ -578,6 +582,7 @@ def gateway(
         web_search_base_url=config.tools.web.search.base_url or None,
         web_search_max_results=config.tools.web.search.max_results,
         exec_config=config.tools.exec,
+        image_gen_config=config.tools.image_gen,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
@@ -783,6 +788,7 @@ def agent(
         web_search_base_url=config.tools.web.search.base_url or None,
         web_search_max_results=config.tools.web.search.max_results,
         exec_config=config.tools.exec,
+        image_gen_config=config.tools.image_gen,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
@@ -956,6 +962,134 @@ def agent(
                 await agent_loop.close_mcp()
 
         asyncio.run(run_interactive())
+
+
+@persona_app.command("import-st-card")
+def persona_import_st_card(
+    file: str = typer.Argument(..., help="Path to a SillyTavern character card JSON file"),
+    name: str | None = typer.Option(None, "--name", help="Override the imported persona name"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite managed persona files if the target directory already exists",
+    ),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Import a SillyTavern character card into `personas/<name>/`."""
+    from nanobot.cli.persona_import import import_sillytavern_character_card
+
+    loaded = _load_runtime_config(config, workspace)
+    loaded.workspace_path.mkdir(parents=True, exist_ok=True)
+    sync_workspace_templates(loaded.workspace_path, silent=True)
+
+    source = Path(file).expanduser().resolve()
+    if not source.is_file():
+        console.print(f"[red]Error: Character card file not found: {source}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        result = import_sillytavern_character_card(
+            loaded.workspace_path,
+            source,
+            persona_name=name,
+            force=force,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    action = "Updated" if result.overwritten else "Imported"
+    console.print(
+        f"[green]✓[/green] {action} SillyTavern card '{result.display_name}' as persona "
+        f"'{result.persona_name}'"
+    )
+    console.print(f"  Persona directory: [cyan]{result.persona_dir}[/cyan]")
+    console.print(f"  Next step: use [cyan]/persona set {result.persona_name}[/cyan] in a session")
+
+
+@persona_app.command("import-st-preset")
+def persona_import_st_preset(
+    file: str = typer.Argument(..., help="Path to a SillyTavern preset JSON file"),
+    persona: str = typer.Option(..., "--persona", help="Target existing persona name"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite STYLE.md if it already exists for the target persona",
+    ),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Import a SillyTavern preset into an existing persona as `STYLE.md`."""
+    from nanobot.cli.persona_import import import_sillytavern_preset
+
+    loaded = _load_runtime_config(config, workspace)
+    loaded.workspace_path.mkdir(parents=True, exist_ok=True)
+    sync_workspace_templates(loaded.workspace_path, silent=True)
+
+    source = Path(file).expanduser().resolve()
+    if not source.is_file():
+        console.print(f"[red]Error: Preset file not found: {source}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        result = import_sillytavern_preset(
+            loaded.workspace_path,
+            source,
+            persona_name=persona,
+            force=force,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    action = "Updated" if result.overwritten else "Imported"
+    console.print(
+        f"[green]✓[/green] {action} SillyTavern preset into persona '{result.persona_name}'"
+    )
+    console.print(f"  Generated file: [cyan]{result.persona_dir / 'STYLE.md'}[/cyan]")
+
+
+@persona_app.command("import-st-worldinfo")
+def persona_import_st_worldinfo(
+    file: str = typer.Argument(..., help="Path to a SillyTavern world info JSON file"),
+    persona: str = typer.Option(..., "--persona", help="Target existing persona name"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite LORE.md if it already exists for the target persona",
+    ),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Import SillyTavern world info into an existing persona as `LORE.md`."""
+    from nanobot.cli.persona_import import import_sillytavern_world_info
+
+    loaded = _load_runtime_config(config, workspace)
+    loaded.workspace_path.mkdir(parents=True, exist_ok=True)
+    sync_workspace_templates(loaded.workspace_path, silent=True)
+
+    source = Path(file).expanduser().resolve()
+    if not source.is_file():
+        console.print(f"[red]Error: World info file not found: {source}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        result = import_sillytavern_world_info(
+            loaded.workspace_path,
+            source,
+            persona_name=persona,
+            force=force,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    action = "Updated" if result.overwritten else "Imported"
+    console.print(
+        f"[green]✓[/green] {action} SillyTavern world info into persona '{result.persona_name}'"
+    )
+    console.print(f"  Generated file: [cyan]{result.persona_dir / 'LORE.md'}[/cyan]")
 
 
 # ============================================================================
