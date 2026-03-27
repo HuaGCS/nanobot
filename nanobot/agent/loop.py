@@ -23,6 +23,7 @@ from nanobot.agent.commands import (
     build_agent_command_router,
 )
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.i18n import (
     DEFAULT_LANGUAGE,
     resolve_language,
@@ -35,6 +36,7 @@ from nanobot.agent.personas import (
     load_persona_voice_settings,
     strip_tagged_response_content,
 )
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -155,6 +157,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
+        self.runner = AgentRunner(provider)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -836,128 +839,78 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
         """
-        # Wrap on_stream with stateful think-tag filter so downstream
-        # consumers (CLI, channels) never see <think> blocks.
-        _raw_stream = on_stream
-        _stream_buf = ""
+        loop_self = self
 
-        async def _filtered_stream(delta: str) -> None:
-            nonlocal _stream_buf
-            prev_clean = self._visible_response_text(_stream_buf, persona)
-            _stream_buf += delta
-            new_clean = self._visible_response_text(_stream_buf, persona)
-            incremental = new_clean[len(prev_clean):]
-            if incremental and _raw_stream:
-                await _raw_stream(incremental)
+        class _LoopHook(AgentHook):
+            def __init__(self) -> None:
+                self._stream_buf = ""
 
-        async def _wrapped_stream_end(*, resuming: bool = False) -> None:
-            nonlocal _stream_buf
-            if on_stream_end:
-                await on_stream_end(resuming=resuming)
-            _stream_buf = ""
+            def wants_streaming(self) -> bool:
+                return on_stream is not None
 
-        final_content: str | None = None
-        tools_used: list[str] = []
-        messages = list(initial_messages)
+            def prepare_messages(
+                self,
+                context: AgentHookContext,
+                tool_definitions: list[dict[str, Any]],
+            ) -> list[dict[str, Any]]:
+                return loop_self._prepare_request_messages(context.messages, tool_definitions)
 
-        for iteration in range(1, self.max_iterations + 1):
-            tool_defs = self.tools.get_definitions()
-            request_messages = self._prepare_request_messages(messages, tool_defs)
+            async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+                prev_clean = loop_self._visible_response_text(self._stream_buf, persona)
+                self._stream_buf += delta
+                new_clean = loop_self._visible_response_text(self._stream_buf, persona)
+                incremental = new_clean[len(prev_clean):]
+                if incremental and on_stream:
+                    await on_stream(incremental)
 
-            if on_stream:
-                response = await self.provider.chat_stream_with_retry(
-                    messages=request_messages,
-                    tools=tool_defs,
-                    model=self.model,
-                    on_content_delta=_filtered_stream,
-                )
-            else:
-                response = await self.provider.chat_with_retry(
-                    messages=request_messages,
-                    tools=tool_defs,
-                    model=self.model,
-                )
+            async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+                if on_stream_end:
+                    await on_stream_end(resuming=resuming)
+                self._stream_buf = ""
 
-            usage = getattr(response, "usage", None) or {}
-            self._last_usage = {
-                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
-                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
-            }
-
-            if response.has_tool_calls:
-                if on_stream and on_stream_end:
-                    await on_stream_end(resuming=True)
-                    _stream_buf = ""
-
+            async def before_execute_tools(self, context: AgentHookContext) -> None:
                 if on_progress:
                     if not on_stream:
-                        thought = self._visible_response_text(response.content, persona)
+                        thought = loop_self._visible_response_text(
+                            context.response.content if context.response else None,
+                            persona,
+                        )
                         if thought:
                             await on_progress(thought)
-                    tool_hint = self._tool_hint(response.tool_calls)
-                    tool_hint = self._strip_think(tool_hint)
+                    tool_hint = loop_self._strip_think(loop_self._tool_hint(context.tool_calls))
                     await on_progress(tool_hint, tool_hint=True)
-
-                tool_call_dicts = [
-                    tc.to_openai_tool_call()
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
-                    reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
-                )
-
-                for tc in response.tool_calls:
-                    tools_used.append(tc.name)
+                for tc in context.tool_calls:
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tc.name, args_str[:200])
+                loop_self._set_tool_context(channel, chat_id, message_id, persona)
 
-                # Re-bind tool context right before execution so that
-                # concurrent sessions don't clobber each other's routing.
-                self._set_tool_context(channel, chat_id, message_id)
+            def normalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+                return loop_self._strip_think(content)
 
-                # Execute all tool calls concurrently — the LLM batches
-                # independent calls in a single response on purpose.
-                # return_exceptions=True ensures all results are collected
-                # even if one tool is cancelled or raises BaseException.
-                results = await asyncio.gather(*(
-                    self.tools.execute(tc.name, tc.arguments)
-                    for tc in response.tool_calls
-                ), return_exceptions=True)
+            def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+                visible = loop_self._filter_persona_response(content, persona)
+                return visible or content
 
-                for tool_call, result in zip(response.tool_calls, results):
-                    if isinstance(result, BaseException):
-                        result = f"Error: {type(result).__name__}: {result}"
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
-            else:
-                if on_stream and on_stream_end:
-                    await on_stream_end(resuming=False)
-                    _stream_buf = ""
-
-                clean = self._strip_think(response.content)
-                visible = self._filter_persona_response(clean, persona)
-                if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = visible or clean or "Sorry, I encountered an error calling the AI model."
-                    break
-                messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
-                )
-                final_content = visible or clean
-                break
-
-        if final_content is None and iteration >= self.max_iterations:
-            logger.warning("Max iterations ({}) reached", self.max_iterations)
-            final_content = (
+        result = await self.runner.run(AgentRunSpec(
+            initial_messages=initial_messages,
+            tools=self.tools,
+            model=self.model,
+            max_iterations=self.max_iterations,
+            hook=_LoopHook(),
+            error_message="Sorry, I encountered an error calling the AI model.",
+            max_iterations_message=(
                 f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
-            )
+            ),
+            concurrent_tools=True,
+        ))
+        self._last_usage = result.usage
+        if result.stop_reason == "max_iterations":
+            logger.warning("Max iterations ({}) reached", self.max_iterations)
+        elif result.stop_reason == "error":
+            logger.error("LLM returned error: {}", ((result.error or result.final_content) or "")[:200])
 
-        return final_content, tools_used, messages
+        return result.final_content, result.tools_used, result.messages
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
