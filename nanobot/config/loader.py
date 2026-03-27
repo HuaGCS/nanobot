@@ -8,6 +8,9 @@ from loguru import logger
 
 from nanobot.config.schema import Config
 
+DEFAULT_CONFIG_DIR = Path.home() / ".nanobot"
+DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.json"
+
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
 
@@ -22,7 +25,12 @@ def get_config_path() -> Path:
     """Get the configuration file path."""
     if _current_config_path:
         return _current_config_path
-    return Path.home() / ".nanobot" / "config.json"
+    return DEFAULT_CONFIG_PATH
+
+
+def get_default_config_path() -> Path:
+    """Return nanobot's default global config file path."""
+    return DEFAULT_CONFIG_PATH
 
 
 def load_config(config_path: Path | None = None) -> Config:
@@ -35,19 +43,19 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-    path = config_path or get_config_path()
+    path = (config_path or get_config_path()).expanduser().resolve(strict=False)
 
     if path.exists():
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(data)
+            return Config.model_validate(data).bind_config_path(path)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             logger.warning(f"Failed to load config from {path}: {e}")
             logger.warning("Using default configuration.")
 
-    return Config()
+    return Config().bind_config_path(path)
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -58,8 +66,9 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         config: Configuration to save.
         config_path: Optional path to save to. Uses default if not provided.
     """
-    path = config_path or get_config_path()
+    path = (config_path or get_config_path()).expanduser().resolve(strict=False)
     path.parent.mkdir(parents=True, exist_ok=True)
+    config.bind_config_path(path)
 
     data = config.model_dump(mode="json", by_alias=True)
 

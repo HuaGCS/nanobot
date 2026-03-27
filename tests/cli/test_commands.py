@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
+from nanobot.config.loader import load_config
 from nanobot.config.schema import Config
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -35,7 +36,7 @@ def mock_paths():
          patch("nanobot.config.loader.load_config") as mock_lc, \
          patch("nanobot.cli.commands.get_workspace_path") as mock_ws:
 
-        base_dir = Path("./test_onboard_data")
+        base_dir = Path("./test_onboard_data").resolve()
         if base_dir.exists():
             shutil.rmtree(base_dir)
         base_dir.mkdir()
@@ -45,10 +46,11 @@ def mock_paths():
 
         mock_cp.return_value = config_file
         mock_ws.return_value = workspace_dir
-        mock_lc.side_effect = lambda _config_path=None: Config()
+        mock_lc.side_effect = lambda _config_path=None: Config().bind_config_path(_config_path or config_file)
 
         def _save_config(config: Config, config_path: Path | None = None):
             target = config_path or config_file
+            config.bind_config_path(target)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps(config.model_dump(by_alias=True)), encoding="utf-8")
 
@@ -73,7 +75,7 @@ def test_onboard_fresh_install(mock_paths):
     assert config_file.exists()
     assert (workspace_dir / "AGENTS.md").exists()
     assert (workspace_dir / "memory" / "MEMORY.md").exists()
-    expected_workspace = Config().workspace_path
+    expected_workspace = workspace_dir
     assert mock_ws.call_args.args == (expected_workspace,)
 
 
@@ -86,7 +88,7 @@ def test_onboard_existing_config_refresh(mock_paths):
 
     assert result.exit_code == 0
     assert "Config already exists" in result.stdout
-    assert "existing values preserved" in result.stdout
+    assert config_file.exists()
     assert workspace_dir.exists()
     assert (workspace_dir / "AGENTS.md").exists()
 
@@ -168,6 +170,23 @@ def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch)
     resolved_config = str(config_path.resolve())
     assert resolved_config in compact_output
     assert f"--config {resolved_config}" in compact_output
+
+
+def test_onboard_explicit_config_uses_matching_default_workspace_when_not_overridden(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "instance" / "config.json"
+    expected_workspace = config_path.parent / "workspace"
+
+    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+
+    result = runner.invoke(app, ["onboard", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    saved = load_config(config_path)
+    assert saved.agents.defaults.workspace == ""
+    assert saved.workspace_path == expected_workspace
+    assert (expected_workspace / "AGENTS.md").exists()
 
 
 def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkeypatch):

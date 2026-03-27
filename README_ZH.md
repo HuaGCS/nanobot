@@ -909,6 +909,8 @@ nanobot 支持 [MCP](https://modelcontextprotocol.io/)。
 ## 多实例
 
 可通过不同的 `--config` 和 `--workspace` 同时运行多个 nanobot 实例。
+如果只传 `--config`，默认工作空间会跟随该配置文件目录，使用 `<config-dir>/workspace`。
+如果配置里设置了 `agents.defaults.workspace`，则以配置值为准；命令行 `--workspace` 仍然最高优先级。
 
 初始化多个实例：
 
@@ -931,7 +933,7 @@ nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 | 组件 | 来源 |
 |------|------|
 | Config | `--config` |
-| Workspace | `--workspace` 或配置文件 |
+| Workspace | `--workspace`、`agents.defaults.workspace` 或 `<config-dir>/workspace` |
 | Cron Jobs | config 所在目录 |
 | 媒体 / 运行时状态 | config 所在目录 |
 
@@ -969,19 +971,19 @@ nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 导入角色卡：
 
 ```bash
-nanobot persona import-st-card /path/to/aria.json -w ~/.nanobot/workspace
+nanobot persona import-st-card /path/to/aria.json -w <workspace>
 ```
 
 导入 preset：
 
 ```bash
-nanobot persona import-st-preset /path/to/preset.json --persona Aria -w ~/.nanobot/workspace
+nanobot persona import-st-preset /path/to/preset.json --persona Aria -w <workspace>
 ```
 
 导入 world info：
 
 ```bash
-nanobot persona import-st-worldinfo /path/to/worldinfo.json --persona Aria -w ~/.nanobot/workspace
+nanobot persona import-st-worldinfo /path/to/worldinfo.json --persona Aria -w <workspace>
 ```
 
 生成的典型目录结构：

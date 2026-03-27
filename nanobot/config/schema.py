@@ -3,7 +3,15 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationInfo,
+    field_validator,
+)
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -468,7 +476,7 @@ class ChannelsConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.nanobot/workspace"
+    workspace: str = ""  # Default: <config-dir>/workspace
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
@@ -609,11 +617,26 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    _config_path: Path | None = PrivateAttr(default=None)
+
+    def bind_config_path(self, config_path: Path | None) -> "Config":
+        """Attach the source config path used to load or save this config."""
+        self._config_path = (
+            Path(config_path).expanduser().resolve(strict=False) if config_path is not None else None
+        )
+        return self
 
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
-        return Path(self.agents.defaults.workspace).expanduser()
+        from nanobot.config.loader import get_default_config_path
+        from nanobot.config.paths import resolve_workspace_path
+
+        config_path = self._config_path or get_default_config_path()
+        return resolve_workspace_path(
+            self.agents.defaults.workspace or None,
+            config_path=config_path,
+        )
 
     def _match_provider(
         self, model: str | None = None

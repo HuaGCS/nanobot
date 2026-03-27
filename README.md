@@ -1647,7 +1647,10 @@ nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 
 ### Path Resolution
 
-When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
+When using `--config`, nanobot derives its runtime data directory from the config file location.
+The default workspace also follows that config directory as `<config-dir>/workspace`. If
+`agents.defaults.workspace` is set in the config, that explicit value wins unless you override it
+with `--workspace`.
 
 To open a CLI session against one of these instances locally:
 
@@ -1664,20 +1667,22 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 | Component | Resolved From | Example |
 |-----------|---------------|---------|
 | **Config** | `--config` path | `~/.nanobot-A/config.json` |
-| **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
+| **Workspace** | `--workspace`, `agents.defaults.workspace`, or `<config-dir>/workspace` | `~/.nanobot-A/workspace/` |
 | **Cron Jobs** | config directory | `~/.nanobot-A/cron/` |
 | **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
 
 ### How It Works
 
 - `--config` selects which config file to load
-- By default, the workspace comes from `agents.defaults.workspace` in that config
+- By default, the workspace is `<config-dir>/workspace`
+- If `agents.defaults.workspace` is set, it overrides the config-derived default
 - If you pass `--workspace`, it overrides the workspace from the config file
 
 ### Minimal Setup
 
 1. Copy your base config into a new instance directory.
-2. Set a different `agents.defaults.workspace` for that instance.
+2. Optionally set a different `agents.defaults.workspace` for that instance if you do not want to
+   use `<config-dir>/workspace`.
 3. Start the instance with `--config`.
 
 Example config:
@@ -1737,7 +1742,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 
 | Command | Description |
 |---------|-------------|
-| `nanobot onboard` | Initialize config & workspace at `~/.nanobot/` |
+| `nanobot onboard` | Initialize the default config and workspace |
 | `nanobot onboard --wizard` | Launch the interactive onboarding wizard |
 | `nanobot onboard -c <config> -w <workspace>` | Initialize or refresh a specific instance config and workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
@@ -1762,14 +1767,14 @@ Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 Import a SillyTavern character card into the active workspace persona tree:
 
 ```bash
-nanobot persona import-st-card /path/to/aria.json -w ~/.nanobot/workspace
+nanobot persona import-st-card /path/to/aria.json -w <workspace>
 ```
 
 If the persona directory already exists, re-run with `--force` to overwrite the managed import
 files:
 
 ```bash
-nanobot persona import-st-card /path/to/aria.json -w ~/.nanobot/workspace --force
+nanobot persona import-st-card /path/to/aria.json -w <workspace> --force
 ```
 
 The importer writes into `<workspace>/personas/<name>/` and generates:
@@ -1796,7 +1801,7 @@ them into the persona system prompt after `SOUL.md` and `USER.md`.
 Import a SillyTavern preset into an existing persona:
 
 ```bash
-nanobot persona import-st-preset /path/to/preset.json --persona Aria -w ~/.nanobot/workspace
+nanobot persona import-st-preset /path/to/preset.json --persona Aria -w <workspace>
 ```
 
 This writes:
@@ -1807,7 +1812,7 @@ This writes:
 Import SillyTavern world info into an existing persona:
 
 ```bash
-nanobot persona import-st-worldinfo /path/to/worldinfo.json --persona Aria -w ~/.nanobot/workspace
+nanobot persona import-st-worldinfo /path/to/worldinfo.json --persona Aria -w <workspace>
 ```
 
 This writes:
@@ -1839,9 +1844,10 @@ These commands are available inside chats handled by `nanobot agent` or `nanobot
 | `/status` | Show runtime status, token usage, and session context estimate |
 | `/help` | Show command help |
 
-`/skill` uses the active workspace for the current process, not a hard-coded
-`~/.nanobot/workspace` path. If you start nanobot with `--workspace`, skill install/uninstall/list/update
-operate on that workspace's `skills/` directory.
+`/skill` uses the active workspace for the current process, not a hard-coded global workspace path.
+If you start nanobot with `--workspace`, skill install/uninstall/list/update operate on that
+workspace's `skills/` directory. Otherwise the default is `<config-dir>/workspace` unless
+`agents.defaults.workspace` is set in the config.
 
 `/skill search` queries the live ClawHub registry API directly at
 `https://lightmake.site/api/skills` using the same sort order as the SkillHub web UI, so search
@@ -1861,9 +1867,11 @@ underlying network or HTTP error directly so the failure is visible to the user.
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
 
-The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
+The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace
+(`<workspace>/HEARTBEAT.md`, default `<config-dir>/workspace/HEARTBEAT.md`). If the file has tasks,
+the agent executes them and delivers results to your most recently active chat channel.
 
-**Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
+**Setup:** edit `<workspace>/HEARTBEAT.md` (created automatically by `nanobot onboard`):
 
 ```markdown
 ## Periodic Tasks

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nanobot.config.loader import get_config_path
+from nanobot.config.loader import get_config_path, get_default_config_path
 from nanobot.utils.helpers import ensure_dir
 
 
@@ -34,29 +34,54 @@ def get_logs_dir() -> Path:
     return get_runtime_subdir("logs")
 
 
-def get_workspace_path(workspace: str | None = None) -> Path:
+def get_global_home_dir() -> Path:
+    """Return nanobot's default global home directory."""
+    return get_default_config_path().parent
+
+
+def get_default_workspace_path(config_path: str | Path | None = None) -> Path:
+    """Return the default workspace path for a config file."""
+    base_config = (
+        Path(config_path).expanduser().resolve(strict=False)
+        if config_path is not None
+        else get_config_path()
+    )
+    return base_config.parent / "workspace"
+
+
+def resolve_workspace_path(
+    workspace: str | Path | None = None, *, config_path: str | Path | None = None
+) -> Path:
+    """Resolve a workspace path without creating it."""
+    if workspace is not None:
+        raw = str(workspace).strip()
+        if raw:
+            return Path(workspace).expanduser()
+    return get_default_workspace_path(config_path)
+
+
+def get_workspace_path(workspace: str | Path | None = None, *, config_path: str | Path | None = None) -> Path:
     """Resolve and ensure the agent workspace path."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
-    return ensure_dir(path)
+    return ensure_dir(resolve_workspace_path(workspace, config_path=config_path))
 
 
-def is_default_workspace(workspace: str | Path | None) -> bool:
-    """Return whether a workspace resolves to nanobot's default workspace path."""
-    current = Path(workspace).expanduser() if workspace is not None else Path.home() / ".nanobot" / "workspace"
-    default = Path.home() / ".nanobot" / "workspace"
+def is_default_workspace(workspace: str | Path | None, *, config_path: str | Path | None = None) -> bool:
+    """Return whether a workspace resolves to the config-derived default workspace path."""
+    current = resolve_workspace_path(workspace, config_path=config_path)
+    default = get_default_workspace_path(config_path)
     return current.resolve(strict=False) == default.resolve(strict=False)
 
 
 def get_cli_history_path() -> Path:
     """Return the shared CLI history file path."""
-    return Path.home() / ".nanobot" / "history" / "cli_history"
+    return get_global_home_dir() / "history" / "cli_history"
 
 
 def get_bridge_install_dir() -> Path:
     """Return the shared WhatsApp bridge installation directory."""
-    return Path.home() / ".nanobot" / "bridge"
+    return get_global_home_dir() / "bridge"
 
 
 def get_legacy_sessions_dir() -> Path:
     """Return the legacy global session directory used for migration fallback."""
-    return Path.home() / ".nanobot" / "sessions"
+    return get_global_home_dir() / "sessions"

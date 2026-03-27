@@ -48,6 +48,7 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - `/skill uninstall` is local workspace cleanup, not a ClawHub subprocess call. Remove `<workspace>/skills/<slug>` and best-effort prune `<workspace>/.clawhub/lock.json`.
 - Treat empty `/skill search` output as a user-visible "no results" case rather than a silent success. Surface npm/registry failures directly to the user.
 - Never hardcode `~/.nanobot/workspace` for skill installation or lookup. Use the active runtime workspace from config or `--workspace`.
+- The implicit default workspace is `<config-dir>/workspace`. If `agents.defaults.workspace` is empty, keep workspace resolution tied to the active config path instead of a separate global default.
 - Workspace skills in `<workspace>/skills/` take precedence over built-in skills with the same directory name.
 - Built-in skills now include `translate`, `living-together`, and `emotional-companion`. Keep them aligned with the existing skill loader and current built-in tool surface instead of importing NanoMate-only runtime assumptions.
 - `nanobot persona import-st-card <file>` imports a SillyTavern character card into `<workspace>/personas/<name>/` by generating `SOUL.md`, `USER.md`, `memory/`, and persona-local metadata under `.nanobot/`.
