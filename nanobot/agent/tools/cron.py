@@ -24,6 +24,10 @@ class CronTool(Tool):
         self._channel = channel
         self._chat_id = chat_id
 
+    def set_default_timezone(self, timezone: str) -> None:
+        """Update the default timezone used for schedule parsing/display."""
+        self._default_timezone = timezone
+
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
         return self._in_cron_context.set(active)

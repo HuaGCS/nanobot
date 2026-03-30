@@ -304,7 +304,18 @@ class AgentLoop:
         if web_fetch_tool := self.tools.get("web_fetch"):
             web_fetch_tool.proxy = self.web_proxy
 
+        if cron_tool := self.tools.get("cron"):
+            if hasattr(cron_tool, "set_default_timezone"):
+                cron_tool.set_default_timezone(self.context.timezone or "UTC")
+
         self._sync_image_gen_tool()
+
+    def _rebind_runtime_workspace(self, workspace: Path) -> None:
+        """Switch runtime-bound workspace references in place."""
+        self.workspace = workspace
+        self.context.rebind_runtime(workspace=workspace, timezone=self.context.timezone)
+        self.sessions.rebind_workspace(workspace)
+        self.memory_consolidator.rebind_runtime(workspace=workspace, sessions=self.sessions)
 
     def _apply_runtime_config(self, config) -> bool:
         """Apply hot-reloadable config to the current agent instance."""
@@ -314,6 +325,13 @@ class AgentLoop:
         tools_cfg = config.tools
         web_cfg = tools_cfg.web
         search_cfg = web_cfg.search
+        next_workspace = config.workspace_path
+        next_timezone = defaults.timezone
+
+        if next_workspace.resolve(strict=False) != self.workspace.resolve(strict=False):
+            self._rebind_runtime_workspace(next_workspace)
+
+        self.context.rebind_runtime(workspace=self.workspace, timezone=next_timezone)
 
         self.model = defaults.model
         self.max_iterations = defaults.max_tool_iterations
@@ -339,6 +357,7 @@ class AgentLoop:
         self.memory_consolidator.context_window_tokens = self.context_window_tokens
         self.memory_consolidator.max_completion_tokens = defaults.max_tokens
         self.subagents.apply_runtime_config(
+            workspace=self.workspace,
             model=self.model,
             brave_api_key=self.brave_api_key,
             web_proxy=self.web_proxy,
@@ -355,6 +374,16 @@ class AgentLoop:
         )
         self._mcp_servers = config.tools.mcp_servers
         return mcp_changed
+
+    async def reload_runtime_config(self, config=None, *, force: bool = False) -> None:
+        """Public wrapper for applying hot-reloadable runtime config."""
+        if config is not None:
+            if self.config_path and self.config_path.exists():
+                self._runtime_config_mtime_ns = self.config_path.stat().st_mtime_ns
+            if self._apply_runtime_config(config):
+                await self._reset_mcp_connections()
+            return
+        await self._reload_runtime_config_if_needed(force=force)
 
     def _sync_image_gen_tool(self) -> None:
         """Register, update, or remove the optional image generation tool."""

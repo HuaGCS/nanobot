@@ -57,6 +57,7 @@ class SubagentManager:
     def apply_runtime_config(
         self,
         *,
+        workspace: Path,
         model: str,
         brave_api_key: str | None,
         web_proxy: str | None,
@@ -67,6 +68,7 @@ class SubagentManager:
         restrict_to_workspace: bool,
     ) -> None:
         """Update runtime-configurable settings for future subagent tasks."""
+        self.workspace = workspace
         self.model = model
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy

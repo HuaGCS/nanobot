@@ -276,6 +276,12 @@ class MemoryConsolidator:
         store_root = persona_workspace(self.workspace, DEFAULT_PERSONA)
         return self._stores.setdefault(store_root, MemoryStore(store_root))
 
+    def rebind_runtime(self, *, workspace: Path, sessions: SessionManager) -> None:
+        """Update workspace/session bindings after a runtime workspace switch."""
+        self.workspace = workspace
+        self.sessions = sessions
+        self._stores.clear()
+
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())

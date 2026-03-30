@@ -31,6 +31,12 @@ class ContextBuilder:
         self.timezone = timezone
         self.skills = SkillsLoader(workspace)
 
+    def rebind_runtime(self, *, workspace: Path, timezone: str | None) -> None:
+        """Update runtime-bound workspace/timezone references in place."""
+        self.workspace = workspace
+        self.timezone = timezone
+        self.skills = SkillsLoader(workspace)
+
     def list_personas(self) -> list[str]:
         """Return the personas available for this workspace."""
         return list_personas(self.workspace)

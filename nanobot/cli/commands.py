@@ -539,7 +539,7 @@ def gateway(
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.config.loader import get_config_path
+    from nanobot.config.loader import get_config_path, load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.gateway.http import GatewayHttpServer
@@ -550,7 +550,9 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
-    config = _load_runtime_config(config, workspace)
+    config_arg = config
+    config = _load_runtime_config(config_arg, workspace)
+    runtime_config_path = Path(config_arg).expanduser().resolve() if config_arg else get_config_path()
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
@@ -572,7 +574,7 @@ def gateway(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        config_path=get_config_path(),
+        config_path=runtime_config_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
@@ -636,7 +638,30 @@ def gateway(
 
     # Create channel manager
     channels = ChannelManager(config, bus)
-    http_server = GatewayHttpServer(config.gateway.host, port)
+
+    async def _reload_runtime_state() -> None:
+        """Force-reload runtime-configurable state after admin config saves."""
+        reloaded = load_config(runtime_config_path)
+        sync_workspace_templates(reloaded.workspace_path, silent=True)
+        cron.rebind_store(reloaded.workspace_path / "cron" / "jobs.json")
+        await agent.reload_runtime_config(reloaded)
+        channels.apply_runtime_config(reloaded)
+        await heartbeat.apply_runtime_config(
+            workspace=reloaded.workspace_path,
+            model=agent.model,
+            interval_s=reloaded.gateway.heartbeat.interval_s,
+            enabled=reloaded.gateway.heartbeat.enabled,
+            timezone=reloaded.agents.defaults.timezone,
+        )
+        http_server.update_runtime_workspace(reloaded.workspace_path)
+
+    http_server = GatewayHttpServer(
+        config.gateway.host,
+        port,
+        config_path=runtime_config_path,
+        workspace=config.workspace_path,
+        reload_runtime=_reload_runtime_state,
+    )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -755,7 +780,9 @@ def agent(
     from nanobot.config.loader import get_config_path
     from nanobot.cron.service import CronService
 
-    config = _load_runtime_config(config, workspace)
+    config_arg = config
+    config = _load_runtime_config(config_arg, workspace)
+    runtime_config_path = Path(config_arg).expanduser().resolve() if config_arg else get_config_path()
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()
@@ -778,7 +805,7 @@ def agent(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        config_path=get_config_path(),
+        config_path=runtime_config_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,

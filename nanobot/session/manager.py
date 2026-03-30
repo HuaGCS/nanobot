@@ -142,6 +142,12 @@ class SessionManager:
         self.legacy_sessions_dir = get_legacy_sessions_dir()
         self._cache: dict[str, Session] = {}
 
+    def rebind_workspace(self, workspace: Path) -> None:
+        """Repoint session storage to a new workspace root."""
+        self.workspace = workspace
+        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self._cache.clear()
+
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
         safe_key = safe_filename(key.replace(":", "_"))

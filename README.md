@@ -1568,7 +1568,7 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 ```
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
-nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
+nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.workspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
 During long tool-using turns, nanobot now compacts older tool results on demand so the system prompt, long-term memory, and recent working context stay inside the active context window.
 
 
@@ -1587,6 +1587,47 @@ During long tool-using turns, nanobot now compacts older tool results on demand 
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `tools.imageGen.enabled` | `false` | When `true`, registers the built-in `image_gen` tool. Generated images are written under `<workspace>/out/image_gen`. |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+
+### Admin UI
+
+nanobot includes a built-in admin page for the active instance. It is disabled by default and must
+be explicitly enabled in the same `config.json` that starts that gateway process.
+
+```json
+{
+  "gateway": {
+    "admin": {
+      "enabled": true,
+      "authKey": "replace-with-a-long-random-key"
+    }
+  }
+}
+```
+
+Behavior:
+
+- The page is served from the same gateway process at `/admin`
+- When `gateway.admin.enabled` is `false`, `/admin` returns `404`
+- When enabled, the page requires the configured authorization key before access
+- The admin UI defaults to Chinese, supports an English switch, and follows the system light/dark theme automatically
+- Saving from the admin config page force-reloads hot-reloadable runtime settings for the current instance
+- The admin UI edits the active instance's `config.json` plus the runtime workspace/persona files
+- In multi-instance setups, each `--config` process gets its own admin switch, key, and workspace scope
+
+The built-in admin UI currently covers:
+
+- Visual `config.json` editing with validation, plus an advanced raw JSON fallback
+- A dedicated command reference page with a left-side command list and right-side detail view for all chat slash commands, aliases, and usage
+- Hover help for every visual config field, so operators can inspect the effect of each option before saving
+- Every visual config field is marked directly as either `Hot reload` or `Requires restart`
+- Persona file editing for the current runtime workspace: `SOUL.md`, `USER.md`, `STYLE.md`, `LORE.md`
+- Persona-local `VOICE.json`
+- Persona-local `.nanobot/st_manifest.json`
+- Inline explanations in the persona detail editor, so each file block explains what it controls before you edit it
+
+If you change `agents.defaults.workspace` in the admin config editor, the current gateway instance
+now rebinds its runtime workspace immediately after saving. Fields explicitly marked `Requires
+restart` still need a process restart before they take effect.
 
 
 ### Timezone
@@ -1677,6 +1718,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 - By default, the workspace is `<config-dir>/workspace`
 - If `agents.defaults.workspace` is set, it overrides the config-derived default
 - If you pass `--workspace`, it overrides the workspace from the config file
+- `gateway.admin` is also per-instance because it lives in that same active config file
 
 ### Minimal Setup
 

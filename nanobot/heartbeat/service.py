@@ -130,6 +130,37 @@ class HeartbeatService:
             self._task.cancel()
             self._task = None
 
+    async def apply_runtime_config(
+        self,
+        *,
+        workspace: Path,
+        model: str,
+        interval_s: int,
+        enabled: bool,
+        timezone: str | None,
+    ) -> None:
+        """Apply runtime-configurable heartbeat settings in place."""
+        interval_changed = self.interval_s != interval_s
+        enabled_changed = self.enabled != enabled
+
+        self.workspace = workspace
+        self.model = model
+        self.interval_s = interval_s
+        self.enabled = enabled
+        self.timezone = timezone
+
+        if self._running and not enabled:
+            self.stop()
+            return
+
+        if not self._running and enabled:
+            await self.start()
+            return
+
+        if self._running and (interval_changed or enabled_changed):
+            self.stop()
+            await self.start()
+
     async def _run_loop(self) -> None:
         """Main heartbeat loop."""
         while self._running:

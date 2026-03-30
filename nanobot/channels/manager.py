@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -128,6 +129,17 @@ class ChannelManager:
                     f'Error: "{name}" has empty allowFrom (denies all). '
                     f'Set ["*"] to allow everyone, or add specific user IDs.'
                 )
+
+    def apply_runtime_config(self, config: Config) -> None:
+        """Update runtime-configurable manager/channel state in place."""
+        self.config = config
+        workspace = config.workspace_path
+        restrict = bool(getattr(config.tools, "restrict_to_workspace", False))
+        for channel in self.channels.values():
+            if hasattr(channel, "_workspace"):
+                channel._workspace = Path(workspace).expanduser()
+            if hasattr(channel, "_restrict_to_workspace"):
+                channel._restrict_to_workspace = restrict
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

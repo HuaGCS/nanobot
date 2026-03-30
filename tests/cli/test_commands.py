@@ -989,9 +989,20 @@ def test_gateway_constructs_http_server_without_public_file_options(monkeypatch,
             self.enabled_channels = []
 
     class _CaptureGatewayHttpServer:
-        def __init__(self, host: str, port: int) -> None:
+        def __init__(
+            self,
+            host: str,
+            port: int,
+            *,
+            config_path: Path,
+            workspace: Path,
+            reload_runtime,
+        ) -> None:
             seen["host"] = host
             seen["port"] = port
+            seen["config_path"] = config_path
+            seen["workspace"] = workspace
+            seen["reload_runtime"] = reload_runtime
             seen["http_server_ctor"] = True
             raise _StopGatewayError("stop")
 
@@ -1005,6 +1016,9 @@ def test_gateway_constructs_http_server_without_public_file_options(monkeypatch,
     assert isinstance(result.exception, _StopGatewayError)
     assert seen["host"] == config.gateway.host
     assert seen["port"] == config.gateway.port
+    assert seen["config_path"] == config_file.resolve()
+    assert seen["workspace"] == config.workspace_path
+    assert callable(seen["reload_runtime"])
     assert seen["http_server_ctor"] is True
     assert "public_files_enabled" not in seen["agent_kwargs"]
 

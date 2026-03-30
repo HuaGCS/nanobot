@@ -25,6 +25,14 @@ Recent history favors short Conventional Commit subjects such as `fix(memory): .
 ## Security & Configuration Tips
 Do not commit real API keys, tokens, chat logs, or workspace data. Keep local secrets in `~/.nanobot/config.json` and use sanitized examples in docs and tests. If you change authentication, network access, or other safety-sensitive behavior, update `README.md` or `SECURITY.md` in the same PR.
 - If a change affects user-visible behavior, commands, workflows, or contributor conventions, update both `README.md` and `AGENTS.md` in the same patch so runtime docs and repo rules stay aligned.
+- `gateway.admin` controls the built-in per-instance admin page. Keep it disabled by default unless explicitly configured, require a non-empty `authKey` when enabled, and treat `/admin` as unreachable when the switch is off.
+- The built-in admin page edits the active instance config plus the started process's runtime workspace/persona files. Do not silently retarget it to some other workspace outside the current instance context.
+- The built-in admin page should also expose a slash-command reference page for the currently supported chat commands, including aliases and concrete usage examples.
+- The admin slash-command reference should use a split layout: command list on the left, selected-command details on the right, and stack vertically on narrow screens.
+- The persona detail editor should include locale-backed inline explanations for each editable file block, not just the raw filename.
+- Admin UI strings must come from `nanobot/locales/en.json` and `nanobot/locales/zh.json`, not hardcoded dictionaries in `nanobot/gateway/admin.py`. Keep Chinese as the default admin locale, allow English switching, and preserve the visual config editor plus raw JSON fallback.
+- Visual admin config fields should include locale-backed hover descriptions for every exposed option, so operators can inspect field semantics without leaving the page.
+- Admin config saves should force-reload hot-reloadable runtime settings for the current instance where supported, and every visual field should be marked directly in the UI as either hot-reloadable or restart-required.
 
 ## Chat Commands & Skills
 - Slash commands are handled in `nanobot/agent/loop.py`; keep parsing logic there instead of scattering command behavior across channels.
@@ -33,7 +41,7 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - `/skill` currently supports `search`, `install`, `uninstall`, `list`, and `update`. Keep subcommand dispatch in `nanobot/agent/loop.py`.
 - `/mcp` supports the default `list` behavior (and explicit `/mcp list`) to show configured MCP servers and registered MCP tools.
 - `/status` should return plain-text runtime info for the active session and stay wired into `/help` plus Telegram's command menu/localization coverage.
-- Agent runtime config should be hot-reloaded from the active `config.json` for safe in-process fields such as `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
+- Agent runtime config should be hot-reloaded from the active `config.json` for safe in-process fields such as `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.workspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
 - Long tool-heavy turns should compact older tool outputs on demand before the next model call so system prompt memory and recent working context are less likely to fall out of the active context window.
 - nanobot does not expose local files over HTTP. If a feature needs a public URL for local files, provide your own static file server and point config such as `mediaBaseUrl` at it.
 - Generated screenshots, downloads, and other temporary user-delivery artifacts should be written under `workspace/out`, not the workspace root. Treat that as the generic delivery-artifact root for tools, MCP servers, and skills.

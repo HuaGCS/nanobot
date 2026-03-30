@@ -541,12 +541,20 @@ class HeartbeatConfig(Base):
     keep_recent_messages: int = 8
 
 
+class GatewayAdminConfig(Base):
+    """Built-in admin page configuration."""
+
+    enabled: bool = False
+    auth_key: str = ""
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    admin: GatewayAdminConfig = Field(default_factory=GatewayAdminConfig)
 
 
 class WebSearchConfig(Base):

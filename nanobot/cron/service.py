@@ -10,7 +10,14 @@ from typing import Any, Callable, Coroutine
 
 from loguru import logger
 
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule, CronStore
+from nanobot.cron.types import (
+    CronJob,
+    CronJobState,
+    CronPayload,
+    CronRunRecord,
+    CronSchedule,
+    CronStore,
+)
 
 
 def _now_ms() -> int:
@@ -191,7 +198,7 @@ class CronService:
 
         self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         self._last_mtime = self.store_path.stat().st_mtime
-    
+
     async def start(self) -> None:
         """Start the cron service."""
         self._running = True
@@ -207,6 +214,19 @@ class CronService:
         if self._timer_task:
             self._timer_task.cancel()
             self._timer_task = None
+
+    def rebind_store(self, store_path: Path) -> None:
+        """Switch the backing jobs store to a new workspace-scoped path."""
+        if self.store_path == store_path:
+            return
+        self.store_path = store_path
+        self._store = None
+        self._last_mtime = 0.0
+        if self._running:
+            self._load_store()
+            self._recompute_next_runs()
+            self._save_store()
+            self._arm_timer()
 
     def _recompute_next_runs(self) -> None:
         """Recompute next run times for all enabled jobs."""
