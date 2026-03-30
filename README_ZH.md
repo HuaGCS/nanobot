@@ -892,6 +892,45 @@ nanobot 支持 [MCP](https://modelcontextprotocol.io/)。
 | `tools.imageGen.enabled` | `false` | 开启内置 `image_gen` |
 | `channels.*.allowFrom` | `[]` | 白名单，空数组默认拒绝所有 |
 
+### Admin 页面
+
+当前仓库内置了实例级 admin 页面，但默认关闭。必须在启动该 gateway 进程所使用的同一个
+`config.json` 里显式开启：
+
+```json
+{
+  "gateway": {
+    "admin": {
+      "enabled": true,
+      "authKey": "replace-with-a-long-random-key"
+    }
+  }
+}
+```
+
+行为规则：
+
+- 页面路径是同一个 gateway 进程下的 `/admin`
+- `gateway.admin.enabled=false` 时，`/admin` 直接返回 `404`
+- 开启后必须输入 `authKey` 才能进入
+- 页面默认中文，可切换英文，并且会自动跟随系统亮/暗主题
+- 在 admin 配置页保存后，当前实例会立即强制重载支持热更新的运行时配置
+- admin 页面处理的是当前实例自己的 `config.json` 和当前运行 workspace 下的 persona 文件
+- 多实例下，每个 `--config` 启动的进程都有自己独立的 admin 开关、密钥和 workspace 作用域
+
+当前 admin 页面支持：
+
+- 可视化编辑并校验 `config.json`，同时保留高级 JSON 兜底编辑器
+- 独立的命令总览页，展示所有聊天 slash 命令、别名和用法
+- 每个可视化配置项都带悬浮说明，鼠标移动到字段名即可查看详细解释
+- 每个可视化配置项都会直接标注“可热重载”或“需重启”
+- 编辑当前 runtime workspace 下 persona 的 `SOUL.md`、`USER.md`、`STYLE.md`、`LORE.md`
+- 编辑 persona 的 `VOICE.json`
+- 编辑 persona 的 `.nanobot/st_manifest.json`
+
+如果你在 admin 页面里改了 `agents.defaults.workspace`，当前 gateway 实例会在保存后立即切换到
+新的 runtime workspace。只有表单里明确标注“需重启”的字段，才需要重启当前进程才能生效。
+
 ### 时区
 
 默认使用 `UTC`。如果希望模型按本地时间理解运行时上下文：
@@ -936,6 +975,10 @@ nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 | Workspace | `--workspace`、`agents.defaults.workspace` 或 `<config-dir>/workspace` |
 | Cron Jobs | config 所在目录 |
 | 媒体 / 运行时状态 | config 所在目录 |
+
+补充：
+
+- `gateway.admin` 也是实例级配置，因为它和当前进程使用的是同一个 `config.json`
 
 适用场景：
 
