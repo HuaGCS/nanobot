@@ -12,6 +12,7 @@ from nanobot.cli.commands import _make_provider, app
 from nanobot.config.loader import load_config
 from nanobot.config.schema import Config
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
+from nanobot.providers.pool_provider import ProviderPoolProvider
 from nanobot.providers.registry import find_by_name
 
 
@@ -323,6 +324,50 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
     assert config.get_api_base() == "http://localhost:8000"
 
 
+def test_config_accepts_provider_pool_list_shorthand_and_normalizes_names():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "model": "gpt-4o-mini",
+                    "providerPool": [
+                        "github-copilot",
+                        {
+                            "provider": "volcengineCodingPlan",
+                            "model": "doubao-1-5-pro",
+                        },
+                    ],
+                }
+            }
+        }
+    )
+
+    assert config.agents.defaults.provider_pool is not None
+    assert config.agents.defaults.provider_pool.strategy == "failover"
+    assert config.agents.defaults.provider_pool.targets[0].provider == "github_copilot"
+    assert config.agents.defaults.provider_pool.targets[1].provider == "volcengine_coding_plan"
+    assert config.agents.defaults.provider_pool.targets[1].model == "doubao-1-5-pro"
+
+
+def test_config_accepts_provider_pool_round_robin_alias():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "model": "gpt-4o-mini",
+                    "providerPool": {
+                        "strategy": "round-robin",
+                        "targets": ["custom", "ollama"],
+                    },
+                }
+            }
+        }
+    )
+
+    assert config.agents.defaults.provider_pool is not None
+    assert config.agents.defaults.provider_pool.strategy == "round_robin"
+
+
 def test_openai_compat_provider_passes_model_through():
     from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
@@ -362,6 +407,47 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     assert kwargs["base_url"] == "https://example.com/v1"
     assert kwargs["default_headers"]["APP-Code"] == "demo-app"
     assert kwargs["default_headers"]["x-session-affinity"] == "sticky-session"
+
+
+def test_make_provider_builds_provider_pool():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "model": "gpt-4o-mini",
+                    "providerPool": {
+                        "strategy": "roundRobin",
+                        "targets": [
+                            {
+                                "provider": "custom",
+                                "model": "gpt-4o-mini",
+                            },
+                            {
+                                "provider": "ollama",
+                                "model": "llama3.2",
+                            },
+                        ],
+                    },
+                }
+            },
+            "providers": {
+                "custom": {
+                    "apiBase": "https://example.com/v1",
+                },
+                "ollama": {
+                    "apiBase": "http://localhost:11434/v1",
+                },
+            },
+        }
+    )
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = _make_provider(config)
+
+    assert isinstance(provider, ProviderPoolProvider)
+    assert provider.strategy == "round_robin"
+    assert [entry.name for entry in provider.entries] == ["custom", "ollama"]
+    assert [entry.model for entry in provider.entries] == ["gpt-4o-mini", "llama3.2"]
 
 
 @pytest.fixture

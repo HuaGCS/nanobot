@@ -405,19 +405,32 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _make_provider(config: Config):
-    """Create the appropriate LLM provider from config.
-
-    Routing is driven by ``ProviderSpec.backend`` in the registry.
-    """
+def _make_single_provider(
+    config: Config,
+    *,
+    model: str,
+    provider_name: str | None = None,
+):
+    """Create one provider instance from config."""
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    model = config.agents.defaults.model
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
-    spec = find_by_name(provider_name) if provider_name else None
+    resolved_provider_name = provider_name or config.get_provider_name(model)
+    spec = find_by_name(resolved_provider_name) if resolved_provider_name else None
+    if provider_name and spec is None:
+        console.print(f"[red]Error: Unknown provider: {provider_name}[/red]")
+        raise typer.Exit(1)
+
+    if spec is not None:
+        p = getattr(config.providers, spec.name, None)
+    else:
+        p = config.get_provider(model)
     backend = spec.backend if spec else "openai_compat"
+    api_base = None
+    if p and p.api_base:
+        api_base = p.api_base
+    elif spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
+        api_base = spec.default_api_base
 
     # --- validation ---
     if backend == "azure_openai":
@@ -449,7 +462,7 @@ def _make_provider(config: Config):
         from nanobot.providers.anthropic_provider import AnthropicProvider
         provider = AnthropicProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_base=api_base,
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
@@ -457,7 +470,7 @@ def _make_provider(config: Config):
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_base=api_base,
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             spec=spec,
@@ -470,6 +483,36 @@ def _make_provider(config: Config):
         reasoning_effort=defaults.reasoning_effort,
     )
     return provider
+
+
+def _make_provider(config: Config):
+    """Create the configured LLM provider or provider pool from config."""
+    defaults = config.agents.defaults
+    provider_pool = defaults.provider_pool
+    if provider_pool and provider_pool.targets:
+        from nanobot.providers.pool_provider import ProviderPoolEntry, ProviderPoolProvider
+
+        entries = [
+            ProviderPoolEntry(
+                name=target.provider,
+                model=target.model,
+                provider=_make_single_provider(
+                    config,
+                    model=target.model or defaults.model,
+                    provider_name=target.provider,
+                ),
+            )
+            for target in provider_pool.targets
+        ]
+        pooled = ProviderPoolProvider(
+            entries,
+            strategy=provider_pool.strategy,
+            default_model=defaults.model,
+        )
+        pooled.generation = entries[0].provider.generation
+        return pooled
+
+    return _make_single_provider(config, model=defaults.model)
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:

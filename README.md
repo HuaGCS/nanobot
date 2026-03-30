@@ -242,6 +242,47 @@ nanobot agent
 
 That's it! You have a working AI assistant in 2 minutes.
 
+### Optional: Provider Pool
+
+If you want automatic failover or request-level rotation across multiple configured providers, add
+`agents.defaults.providerPool`:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-xxx"
+    },
+    "deepseek": {
+      "apiKey": "sk-xxx"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "providerPool": {
+        "strategy": "failover",
+        "targets": [
+          {
+            "provider": "openrouter",
+            "model": "openai/gpt-4o-mini"
+          },
+          {
+            "provider": "deepseek",
+            "model": "deepseek-chat"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+- `strategy: "failover"` tries the targets in order until one returns successfully.
+- `strategy: "round_robin"` rotates the starting target on each request and still falls through on
+  provider errors.
+- If a target omits `model`, nanobot uses `agents.defaults.model`.
+- A non-empty `providerPool` takes precedence over `agents.defaults.provider`.
+
 ### Optional: Web Search
 
 `web_search` supports both Brave Search and SearXNG.
@@ -1576,6 +1617,7 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.workspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
+`agents.defaults.providerPool` also requires a restart because it changes provider routing.
 During long tool-using turns, nanobot now compacts older tool results on demand so the system prompt, long-term memory, and recent working context stay inside the active context window.
 
 ### Memorix via MCP
@@ -1710,6 +1752,8 @@ Behavior:
 The built-in admin UI currently covers:
 
 - Visual `config.json` editing with validation, plus an advanced raw JSON fallback
+- Visual `agents.defaults.providerPool` editing with a row-based target editor for failover / round-robin strategy, plus add/remove and reorder controls for ordered targets
+- Visual editing for common `providers.*` blocks such as `openrouter`, `openai`, `anthropic`, `deepseek`, `custom`, `ollama`, and `vllm`, grouped into per-provider collapsible cards with safe at-a-glance summaries
 - A dedicated command reference page with a left-side command list and right-side detail view for all chat slash commands, aliases, and usage
 - Hover help for every visual config field, so operators can inspect the effect of each option before saving
 - Every visual config field is marked directly as either `Hot reload` or `Requires restart`

@@ -476,6 +476,65 @@ class ChannelsConfig(Base):
         return _coerce_multi_channel_config(value, single_cls, multi_cls)
 
 
+class ProviderPoolTarget(Base):
+    """One provider target inside a provider pool."""
+
+    provider: str
+    model: str | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def _normalize_provider_name(cls, value: str) -> str:
+        from nanobot.providers.registry import find_by_name
+
+        normalized = (value or "").strip()
+        if not normalized:
+            raise ValueError("provider pool target requires a provider name")
+        spec = find_by_name(normalized)
+        if spec is None:
+            raise ValueError(f"unknown provider '{value}'")
+        return spec.name
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def _empty_model_to_none(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
+class ProviderPoolConfig(Base):
+    """Provider selection policy for multi-provider routing."""
+
+    strategy: Literal["failover", "round_robin"] = "failover"
+    targets: list[ProviderPoolTarget] = Field(default_factory=list)
+
+    @field_validator("strategy", mode="before")
+    @classmethod
+    def _normalize_strategy(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            normalized = value.strip().lower().replace("-", "_")
+            if normalized == "roundrobin":
+                return "round_robin"
+            return normalized
+        return value
+
+    @field_validator("targets", mode="before")
+    @classmethod
+    def _coerce_targets(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            return value
+        coerced: list[Any] = []
+        for item in value:
+            if isinstance(item, str):
+                coerced.append({"provider": item})
+            else:
+                coerced.append(item)
+        return coerced
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -490,6 +549,19 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    provider_pool: ProviderPoolConfig | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None or not value.targets,
+    )
+
+    @field_validator("provider_pool", mode="before")
+    @classmethod
+    def _coerce_provider_pool(cls, value: Any) -> Any:
+        if value in (None, ""):
+            return None
+        if isinstance(value, list):
+            return {"targets": value}
+        return value
 
 
 class AgentsConfig(Base):

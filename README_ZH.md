@@ -134,6 +134,45 @@ nanobot gateway
 
 ## 可选能力
 
+### Provider 池：故障切换 / 轮询
+
+如果你想在多个已配置 provider 之间自动切换，可以使用 `agents.defaults.providerPool`：
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-xxx"
+    },
+    "deepseek": {
+      "apiKey": "sk-xxx"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "providerPool": {
+        "strategy": "failover",
+        "targets": [
+          {
+            "provider": "openrouter",
+            "model": "openai/gpt-4o-mini"
+          },
+          {
+            "provider": "deepseek",
+            "model": "deepseek-chat"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+- `strategy: "failover"`：按顺序尝试，直到某个 provider 成功返回。
+- `strategy: "round_robin"`：每次请求轮换起始 provider；如果当前 provider 出错，仍会继续尝试后续目标。
+- 某个 target 没写 `model` 时，会回退到 `agents.defaults.model`。
+- 只要 `providerPool.targets` 非空，就会优先于 `agents.defaults.provider` 生效。
+
 ### Web 搜索
 
 `web_search` 支持 Brave Search 和 SearXNG。
@@ -1016,6 +1055,8 @@ HTTP 示例：
 当前 admin 页面支持：
 
 - 可视化编辑并校验 `config.json`，同时保留高级 JSON 兜底编辑器
+- 可视化编辑 `agents.defaults.providerPool`，提供按行维护 targets 的列表式界面，支持新增 / 删除 / 排序，以及故障切换 / 轮询策略
+- 可视化编辑常用 `providers.*` 配置块，例如 `openrouter`、`openai`、`anthropic`、`deepseek`、`custom`、`ollama`、`vllm`，并按 provider 分组成可折叠卡片，收起时显示安全摘要
 - 可视化编辑专门的 `Memorix MCP` 分区，对应 `tools.mcpServers.memorix`
 - 可视化编辑 `Mem0 预留配置` 分区，对应 `memory.user.mem0`
 - 独立的命令总览页，展示所有聊天 slash 命令、别名和用法
@@ -1027,6 +1068,7 @@ HTTP 示例：
 
 如果你在 admin 页面里改了 `agents.defaults.workspace`，当前 gateway 实例会在保存后立即切换到
 新的 runtime workspace。只有表单里明确标注“需重启”的字段，才需要重启当前进程才能生效。
+`agents.defaults.providerPool` 也属于需重启项，因为它会改变 provider 路由策略。
 
 ### 时区
 

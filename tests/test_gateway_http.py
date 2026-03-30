@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -141,6 +142,17 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert "配置编辑" in config_page.text
     assert "/admin/commands" in config_page.text
     assert 'name="agents_defaults_model"' in config_page.text
+    assert 'name="agents_defaults_provider_pool_strategy"' in config_page.text
+    assert 'name="agents_defaults_provider_pool_targets_provider"' in config_page.text
+    assert 'name="agents_defaults_provider_pool_targets_model"' in config_page.text
+    assert 'name="providers_openrouter_api_key"' in config_page.text
+    assert 'name="providers_custom_extra_headers"' in config_page.text
+    assert 'name="providers_ollama_api_base"' in config_page.text
+    assert 'data-provider-group="openrouter"' in config_page.text
+    assert 'data-provider-group="custom"' in config_page.text
+    assert 'data-provider-pool-editor' in config_page.text
+    assert 'data-provider-pool-move-up' in config_page.text
+    assert 'data-provider-pool-move-down' in config_page.text
     assert 'name="memory_user_mem0_llm_api_key"' in config_page.text
     assert 'name="memory_user_mem0_llm_headers"' in config_page.text
     assert 'name="memory_user_mem0_metadata"' in config_page.text
@@ -205,6 +217,20 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
             ("tools_mcp_memorix_url", "http://127.0.0.1:3211/mcp"),
             ("tools_mcp_memorix_tool_timeout", "75"),
             ("agents_defaults_model", "openai/gpt-4.1"),
+            ("agents_defaults_provider_pool_strategy", "failover"),
+            ("agents_defaults_provider_pool_targets_provider", "openrouter"),
+            ("agents_defaults_provider_pool_targets_model", "openai/gpt-4.1"),
+            ("agents_defaults_provider_pool_targets_provider", "deepseek"),
+            ("agents_defaults_provider_pool_targets_model", "deepseek-chat"),
+            ("providers_openrouter_api_key", "sk-or-v1-admin"),
+            ("providers_openrouter_api_base", "https://openrouter.ai/api/v1"),
+            ("providers_deepseek_api_key", "sk-deepseek-admin"),
+            ("providers_deepseek_api_base", "https://api.deepseek.com"),
+            ("providers_custom_api_key", "custom-admin-key"),
+            ("providers_custom_api_base", "https://custom.example.com/v1"),
+            ("providers_custom_extra_headers", '{"APP-Code":"admin-demo"}'),
+            ("providers_ollama_api_base", "http://localhost:11434/v1"),
+            ("providers_vllm_api_base", "http://localhost:8000"),
             ("channels_voice_reply_provider", "sovits"),
             ("channels_voice_reply_sovits_api_url", "http://127.0.0.1:9880"),
             ("gateway_admin_auth_key", "secret-key"),
@@ -246,6 +272,30 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert saved["tools"]["mcpServers"]["memorix"]["args"] == ["serve"]
     assert saved["tools"]["mcpServers"]["memorix"]["url"] == "http://127.0.0.1:3211/mcp"
     assert saved["tools"]["mcpServers"]["memorix"]["toolTimeout"] == 75
+    assert saved["providers"]["openrouter"]["apiKey"] == "sk-or-v1-admin"
+    assert saved["providers"]["openrouter"]["apiBase"] == "https://openrouter.ai/api/v1"
+    assert saved["providers"]["deepseek"]["apiKey"] == "sk-deepseek-admin"
+    assert saved["providers"]["deepseek"]["apiBase"] == "https://api.deepseek.com"
+    assert saved["providers"]["custom"]["apiKey"] == "custom-admin-key"
+    assert saved["providers"]["custom"]["apiBase"] == "https://custom.example.com/v1"
+    assert saved["providers"]["custom"]["extraHeaders"] == {"APP-Code": "admin-demo"}
+    assert saved["providers"]["ollama"]["apiBase"] == "http://localhost:11434/v1"
+    assert saved["providers"]["vllm"]["apiBase"] == "http://localhost:8000"
+    assert saved["agents"]["defaults"]["providerPool"]["strategy"] == "failover"
+    assert saved["agents"]["defaults"]["providerPool"]["targets"] == [
+        {"provider": "openrouter", "model": "openai/gpt-4.1"},
+        {"provider": "deepseek", "model": "deepseek-chat"},
+    ]
+
+    overview_page = await _call_route(
+        app,
+        "GET",
+        "/admin",
+        cookies={"nanobot_admin_session": cookie},
+    )
+    assert overview_page.status == 200
+    assert "providerPool/failover" in overview_page.text
+    assert "openrouter, deepseek" in overview_page.text
 
 
 @pytest.mark.asyncio
@@ -285,6 +335,15 @@ async def test_gateway_admin_language_switch_and_raw_json_editor(tmp_path: Path)
     assert "/admin/commands" in config_page.text
     assert "Advanced JSON editor" in config_page.text
     assert "Default workspace path" in config_page.text
+    assert 'name="agents_defaults_provider_pool_strategy"' in config_page.text
+    assert 'name="agents_defaults_provider_pool_targets_provider"' in config_page.text
+    assert 'name="agents_defaults_provider_pool_targets_model"' in config_page.text
+    assert 'name="providers_openrouter_api_key"' in config_page.text
+    assert 'name="providers_custom_extra_headers"' in config_page.text
+    assert 'data-provider-group="openrouter"' in config_page.text
+    assert 'data-provider-group="custom"' in config_page.text
+    assert 'data-provider-pool-move-up' in config_page.text
+    assert 'data-provider-pool-move-down' in config_page.text
     assert "Mem0 Reserved Config" in config_page.text
     assert 'name="memory_user_mem0_llm_api_key"' in config_page.text
     assert 'name="memory_user_mem0_llm_headers"' in config_page.text
@@ -331,6 +390,161 @@ async def test_gateway_admin_language_switch_and_raw_json_editor(tmp_path: Path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["agents"]["defaults"]["model"] == "openai/gpt-5-mini"
     assert saved["gateway"]["host"] == "127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_provider_group_summaries_are_compact_and_safe(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.gateway.admin.enabled = True
+    config.gateway.admin.auth_key = "secret-key"
+    config.providers.openrouter.api_key = "sk-or-v1-summary"
+    config.providers.openrouter.api_base = "https://openrouter.ai/api/v1"
+    config.providers.custom.api_key = "custom-summary-key"
+    config.providers.custom.api_base = "https://custom.example.com/v1"
+    config.providers.custom.extra_headers = {"APP-Code": "demo", "X-Tenant": "team-a"}
+    config.providers.ollama.api_base = "http://localhost:11434/v1"
+    save_config(config, config_path)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        cookies={"nanobot_admin_lang": "en"},
+        data={"auth_key": "secret-key", "next": "/admin/config"},
+    )
+    assert login.status == 302
+    session_cookie = login.cookies["nanobot_admin_session"].value
+
+    config_page = await _call_route(
+        app,
+        "GET",
+        "/admin/config",
+        cookies={"nanobot_admin_session": session_cookie, "nanobot_admin_lang": "en"},
+    )
+    assert config_page.status == 200
+    assert 'data-provider-group-meta="openrouter"' in config_page.text
+    assert 'data-provider-group-meta="custom"' in config_page.text
+    assert 'data-provider-group-meta="ollama"' in config_page.text
+
+    openrouter_summary = re.search(
+        r'data-provider-group="openrouter"[^>]*>\s*<summary>(.*?)</summary>',
+        config_page.text,
+        re.S,
+    )
+    assert openrouter_summary is not None
+    assert "API key" in openrouter_summary.group(1)
+    assert "openrouter.ai/api/v1" in openrouter_summary.group(1)
+    assert "sk-or-v1-summary" not in openrouter_summary.group(1)
+
+    custom_summary = re.search(
+        r'data-provider-group="custom"[^>]*>\s*<summary>(.*?)</summary>',
+        config_page.text,
+        re.S,
+    )
+    assert custom_summary is not None
+    assert "API key" in custom_summary.group(1)
+    assert "custom.example.com/v1" in custom_summary.group(1)
+    assert "2 headers" in custom_summary.group(1)
+    assert "custom-summary-key" not in custom_summary.group(1)
+
+    ollama_summary = re.search(
+        r'data-provider-group="ollama"[^>]*>\s*<summary>(.*?)</summary>',
+        config_page.text,
+        re.S,
+    )
+    assert ollama_summary is not None
+    assert "localhost:11434/v1" in ollama_summary.group(1)
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_visual_empty_provider_pool_targets_remove_pool(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config.model_validate(
+        {
+            "gateway": {"admin": {"enabled": True, "authKey": "secret-key"}},
+            "agents": {
+                "defaults": {
+                    "providerPool": {
+                        "strategy": "failover",
+                        "targets": [
+                            {"provider": "openrouter", "model": "openai/gpt-4o-mini"},
+                        ],
+                    }
+                }
+            },
+        }
+    )
+    save_config(config, config_path)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        data={"auth_key": "secret-key", "next": "/admin"},
+    )
+    cookie = login.cookies["nanobot_admin_session"].value
+
+    save_resp = await _call_route(
+        app,
+        "POST",
+        "/admin/config",
+        cookies={"nanobot_admin_session": cookie},
+        data=[
+            ("mode", "visual"),
+            ("agents_defaults_provider_pool_strategy", "failover"),
+            ("agents_defaults_provider_pool_targets_provider", ""),
+            ("agents_defaults_provider_pool_targets_model", ""),
+            ("gateway_admin_auth_key", "secret-key"),
+        ],
+    )
+    assert save_resp.status == 302
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "providerPool" not in saved["agents"]["defaults"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_visual_provider_pool_row_requires_provider(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.gateway.admin.enabled = True
+    config.gateway.admin.auth_key = "secret-key"
+    save_config(config, config_path)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        data={"auth_key": "secret-key", "next": "/admin"},
+    )
+    cookie = login.cookies["nanobot_admin_session"].value
+
+    response = await _call_route(
+        app,
+        "POST",
+        "/admin/config",
+        cookies={"nanobot_admin_session": cookie},
+        data=[
+            ("mode", "visual"),
+            ("agents_defaults_provider_pool_strategy", "failover"),
+            ("agents_defaults_provider_pool_targets_provider", ""),
+            ("agents_defaults_provider_pool_targets_model", "deepseek-chat"),
+            ("gateway_admin_auth_key", "secret-key"),
+        ],
+    )
+
+    assert response.status == 200
+    assert "providerPool target" in response.text
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "providerPool" not in saved["agents"]["defaults"]
 
 
 @pytest.mark.asyncio

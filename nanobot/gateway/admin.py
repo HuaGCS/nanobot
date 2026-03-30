@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 from aiohttp import web
 
@@ -101,6 +101,24 @@ _CONFIG_FIELDS = (
         restart_required=True,
     ),
     ConfigFieldSpec(
+        "agents_defaults_provider_pool_strategy",
+        ("agents", "defaults", "providerPool", "strategy"),
+        "select",
+        "admin_config_agents_provider_pool_strategy_label",
+        "admin_config_agents_provider_pool_strategy_hint",
+        options=("failover", "round_robin"),
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "agents_defaults_provider_pool_targets",
+        ("agents", "defaults", "providerPool", "targets"),
+        "provider_pool_targets",
+        "admin_config_agents_provider_pool_targets_label",
+        "admin_config_agents_provider_pool_targets_hint",
+        rows=8,
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
         "agents_defaults_max_tokens",
         ("agents", "defaults", "maxTokens"),
         "int",
@@ -137,6 +155,105 @@ _CONFIG_FIELDS = (
         "text",
         "admin_config_agents_timezone_label",
         placeholder="Asia/Shanghai",
+    ),
+    ConfigFieldSpec(
+        "providers_openrouter_api_key",
+        ("providers", "openrouter", "apiKey"),
+        "text",
+        "admin_config_providers_openrouter_api_key_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_openrouter_api_base",
+        ("providers", "openrouter", "apiBase"),
+        "text",
+        "admin_config_providers_openrouter_api_base_label",
+        placeholder="https://openrouter.ai/api/v1",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_openai_api_key",
+        ("providers", "openai", "apiKey"),
+        "text",
+        "admin_config_providers_openai_api_key_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_openai_api_base",
+        ("providers", "openai", "apiBase"),
+        "text",
+        "admin_config_providers_openai_api_base_label",
+        placeholder="https://api.openai.com/v1",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_anthropic_api_key",
+        ("providers", "anthropic", "apiKey"),
+        "text",
+        "admin_config_providers_anthropic_api_key_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_anthropic_api_base",
+        ("providers", "anthropic", "apiBase"),
+        "text",
+        "admin_config_providers_anthropic_api_base_label",
+        placeholder="https://api.anthropic.com",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_deepseek_api_key",
+        ("providers", "deepseek", "apiKey"),
+        "text",
+        "admin_config_providers_deepseek_api_key_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_deepseek_api_base",
+        ("providers", "deepseek", "apiBase"),
+        "text",
+        "admin_config_providers_deepseek_api_base_label",
+        placeholder="https://api.deepseek.com",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_custom_api_key",
+        ("providers", "custom", "apiKey"),
+        "text",
+        "admin_config_providers_custom_api_key_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_custom_api_base",
+        ("providers", "custom", "apiBase"),
+        "text",
+        "admin_config_providers_custom_api_base_label",
+        placeholder="https://api.your-provider.com/v1",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_custom_extra_headers",
+        ("providers", "custom", "extraHeaders"),
+        "json",
+        "admin_config_providers_custom_extra_headers_label",
+        rows=5,
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_ollama_api_base",
+        ("providers", "ollama", "apiBase"),
+        "text",
+        "admin_config_providers_ollama_api_base_label",
+        placeholder="http://localhost:11434/v1",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "providers_vllm_api_base",
+        ("providers", "vllm", "apiBase"),
+        "text",
+        "admin_config_providers_vllm_api_base_label",
+        placeholder="http://localhost:8000",
+        restart_required=True,
     ),
     ConfigFieldSpec(
         "gateway_host",
@@ -702,6 +819,74 @@ _MEMORIX_CONFIG_FIELD_NAMES = {
     "tools_mcp_memorix_url",
     "tools_mcp_memorix_tool_timeout",
 }
+_PROVIDER_POOL_CONFIG_FIELD_NAMES = {
+    "agents_defaults_provider_pool_strategy",
+    "agents_defaults_provider_pool_targets",
+}
+_PROVIDER_CONFIG_GROUPS = (
+    (
+        "openrouter",
+        "admin_provider_group_openrouter_title",
+        "admin_provider_group_openrouter_desc",
+        (
+            "providers_openrouter_api_key",
+            "providers_openrouter_api_base",
+        ),
+    ),
+    (
+        "openai",
+        "admin_provider_group_openai_title",
+        "admin_provider_group_openai_desc",
+        (
+            "providers_openai_api_key",
+            "providers_openai_api_base",
+        ),
+    ),
+    (
+        "anthropic",
+        "admin_provider_group_anthropic_title",
+        "admin_provider_group_anthropic_desc",
+        (
+            "providers_anthropic_api_key",
+            "providers_anthropic_api_base",
+        ),
+    ),
+    (
+        "deepseek",
+        "admin_provider_group_deepseek_title",
+        "admin_provider_group_deepseek_desc",
+        (
+            "providers_deepseek_api_key",
+            "providers_deepseek_api_base",
+        ),
+    ),
+    (
+        "custom",
+        "admin_provider_group_custom_title",
+        "admin_provider_group_custom_desc",
+        (
+            "providers_custom_api_key",
+            "providers_custom_api_base",
+            "providers_custom_extra_headers",
+        ),
+    ),
+    (
+        "ollama",
+        "admin_provider_group_ollama_title",
+        "admin_provider_group_ollama_desc",
+        (
+            "providers_ollama_api_base",
+        ),
+    ),
+    (
+        "vllm",
+        "admin_provider_group_vllm_title",
+        "admin_provider_group_vllm_desc",
+        (
+            "providers_vllm_api_base",
+        ),
+    ),
+)
 _CONFIG_SECTIONS = (
     (
         "admin_config_section_agents_title",
@@ -710,12 +895,33 @@ _CONFIG_SECTIONS = (
             "agents_defaults_workspace",
             "agents_defaults_model",
             "agents_defaults_provider",
+            "agents_defaults_provider_pool_strategy",
+            "agents_defaults_provider_pool_targets",
             "agents_defaults_max_tokens",
             "agents_defaults_context_window_tokens",
             "agents_defaults_temperature",
             "agents_defaults_max_tool_iterations",
             "agents_defaults_reasoning_effort",
             "agents_defaults_timezone",
+        ),
+    ),
+    (
+        "admin_config_section_providers_title",
+        "admin_config_section_providers_desc",
+        (
+            "providers_openrouter_api_key",
+            "providers_openrouter_api_base",
+            "providers_openai_api_key",
+            "providers_openai_api_base",
+            "providers_anthropic_api_key",
+            "providers_anthropic_api_base",
+            "providers_deepseek_api_key",
+            "providers_deepseek_api_base",
+            "providers_custom_api_key",
+            "providers_custom_api_base",
+            "providers_custom_extra_headers",
+            "providers_ollama_api_base",
+            "providers_vllm_api_base",
         ),
     ),
     (
@@ -1445,6 +1651,126 @@ def _page(
     .field.full {{
       grid-column: 1 / -1;
     }}
+    .provider-pool-editor {{
+      display: grid;
+      gap: 12px;
+    }}
+    .provider-groups {{
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }}
+    .provider-group {{
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel-soft);
+      overflow: hidden;
+    }}
+    .provider-group[open] {{
+      border-color: rgba(12, 122, 108, 0.28);
+      box-shadow: inset 0 0 0 1px rgba(12, 122, 108, 0.06);
+    }}
+    .provider-group summary {{
+      list-style: none;
+      display: grid;
+      gap: 10px;
+      padding: 16px;
+      cursor: pointer;
+    }}
+    .provider-group summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .provider-group-top {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }}
+    .provider-group-title {{
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.2;
+    }}
+    .provider-group-desc {{
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .provider-group-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }}
+    .provider-group-chip {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      max-width: 100%;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.10);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    .provider-group-chip.code {{
+      background: rgba(12, 122, 108, 0.08);
+      color: var(--ink);
+    }}
+    .provider-group-chip code {{
+      font-size: 12px;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .provider-group-body {{
+      padding: 0 16px 16px;
+    }}
+    .provider-group-fields {{
+      display: grid;
+      gap: 12px;
+    }}
+    .provider-pool-head,
+    .provider-pool-row {{
+      display: grid;
+      gap: 10px;
+      grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto;
+      align-items: center;
+    }}
+    .provider-pool-head {{
+      padding: 0 2px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
+    .provider-pool-rows {{
+      display: grid;
+      gap: 10px;
+    }}
+    .provider-pool-row {{
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.03);
+    }}
+    .provider-pool-row-actions {{
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }}
+    .provider-pool-move,
+    .provider-pool-remove {{
+      white-space: nowrap;
+    }}
+    .provider-pool-actions {{
+      justify-content: flex-start;
+    }}
     .field .label {{
       font-weight: 600;
     }}
@@ -1787,6 +2113,13 @@ def _page(
       .field {{
         padding: 12px;
       }}
+      .provider-pool-head,
+      .provider-pool-row {{
+        grid-template-columns: 1fr;
+      }}
+      .provider-pool-row-actions {{
+        justify-content: flex-start;
+      }}
     }}
   </style>
 </head>
@@ -1924,6 +2257,7 @@ def _set_nested_value(data: dict[str, Any], path: tuple[str, ...], value: Any) -
 def _config_form_values(config: Config) -> dict[str, Any]:
     voice = config.channels.voice_reply
     memorix = config.tools.mcp_servers.get(_MEMORIX_MCP_SERVER_NAME)
+    provider_pool = config.agents.defaults.provider_pool
     memorix_args = (
         list(memorix.args)
         if memorix and memorix.args
@@ -1933,12 +2267,32 @@ def _config_form_values(config: Config) -> dict[str, Any]:
         "agents_defaults_workspace": config.agents.defaults.workspace,
         "agents_defaults_model": config.agents.defaults.model,
         "agents_defaults_provider": config.agents.defaults.provider,
+        "agents_defaults_provider_pool_strategy": (
+            provider_pool.strategy if provider_pool and provider_pool.targets else "failover"
+        ),
+        "agents_defaults_provider_pool_targets": [
+            target.model_dump(mode="json", by_alias=True)
+            for target in (provider_pool.targets if provider_pool else [])
+        ],
         "agents_defaults_max_tokens": str(config.agents.defaults.max_tokens),
         "agents_defaults_context_window_tokens": str(config.agents.defaults.context_window_tokens),
         "agents_defaults_temperature": str(config.agents.defaults.temperature),
         "agents_defaults_max_tool_iterations": str(config.agents.defaults.max_tool_iterations),
         "agents_defaults_reasoning_effort": config.agents.defaults.reasoning_effort or "",
         "agents_defaults_timezone": config.agents.defaults.timezone,
+        "providers_openrouter_api_key": config.providers.openrouter.api_key,
+        "providers_openrouter_api_base": config.providers.openrouter.api_base or "",
+        "providers_openai_api_key": config.providers.openai.api_key,
+        "providers_openai_api_base": config.providers.openai.api_base or "",
+        "providers_anthropic_api_key": config.providers.anthropic.api_key,
+        "providers_anthropic_api_base": config.providers.anthropic.api_base or "",
+        "providers_deepseek_api_key": config.providers.deepseek.api_key,
+        "providers_deepseek_api_base": config.providers.deepseek.api_base or "",
+        "providers_custom_api_key": config.providers.custom.api_key,
+        "providers_custom_api_base": config.providers.custom.api_base or "",
+        "providers_custom_extra_headers": _pretty_json(config.providers.custom.extra_headers or {}),
+        "providers_ollama_api_base": config.providers.ollama.api_base or "",
+        "providers_vllm_api_base": config.providers.vllm.api_base or "",
         "gateway_host": config.gateway.host,
         "gateway_port": str(config.gateway.port),
         "gateway_heartbeat_enabled": config.gateway.heartbeat.enabled,
@@ -2034,6 +2388,18 @@ def _extract_visual_values(
             if field.name in bool_fields:
                 values[field.name] = str(form.get(field.name, "")).lower() in {"1", "true", "on", "yes"}
             continue
+        if field.kind == "provider_pool_targets":
+            providers = [str(value) for value in form.getall(f"{field.name}_provider", [])]
+            models = [str(value) for value in form.getall(f"{field.name}_model", [])]
+            row_count = max(len(providers), len(models))
+            values[field.name] = [
+                {
+                    "provider": providers[index] if index < len(providers) else "",
+                    "model": models[index] if index < len(models) else "",
+                }
+                for index in range(row_count)
+            ]
+            continue
         if field.name in form:
             values[field.name] = str(form.get(field.name, ""))
     return values
@@ -2059,6 +2425,25 @@ def _parse_visual_value(request: web.Request, field: ConfigFieldSpec, raw_value:
         if not isinstance(data, dict):
             raise ValueError(_t(request, "admin_json_object_required"))
         return data
+
+    if field.kind == "provider_pool_targets":
+        rows = raw_value if isinstance(raw_value, list) else []
+        normalized_rows: list[dict[str, str]] = []
+        for item in rows:
+            provider = ""
+            model = ""
+            if isinstance(item, dict):
+                provider = str(item.get("provider", "")).strip()
+                model = str(item.get("model", "")).strip()
+            if not provider and not model:
+                continue
+            if not provider:
+                raise ValueError(_t(request, "admin_error_provider_pool_target_provider_required"))
+            row = {"provider": provider}
+            if model:
+                row["model"] = model
+            normalized_rows.append(row)
+        return normalized_rows
 
     if field.kind == "int":
         if not stripped:
@@ -2145,8 +2530,33 @@ def _apply_visual_config_values(
         if not servers_node:
             tools_node.pop("mcpServers", None)
 
+    provider_pool_targets = _parse_visual_value(
+        request,
+        _CONFIG_FIELD_MAP["agents_defaults_provider_pool_targets"],
+        visual_values["agents_defaults_provider_pool_targets"],
+    )
+    agents_node = updated.setdefault("agents", {})
+    if not isinstance(agents_node, dict):
+        agents_node = {}
+        updated["agents"] = agents_node
+    defaults_node = agents_node.get("defaults")
+    if not isinstance(defaults_node, dict):
+        defaults_node = {}
+        agents_node["defaults"] = defaults_node
+
+    if provider_pool_targets:
+        provider_pool_strategy = _parse_visual_value(
+            request,
+            _CONFIG_FIELD_MAP["agents_defaults_provider_pool_strategy"],
+            visual_values["agents_defaults_provider_pool_strategy"],
+        )
+        _set_nested_value(updated, ("agents", "defaults", "providerPool", "strategy"), provider_pool_strategy)
+        _set_nested_value(updated, ("agents", "defaults", "providerPool", "targets"), provider_pool_targets)
+    else:
+        defaults_node.pop(_resolve_nested_key(defaults_node, "providerPool"), None)
+
     for field in _CONFIG_FIELDS:
-        if field.name in _MEMORIX_CONFIG_FIELD_NAMES:
+        if field.name in _MEMORIX_CONFIG_FIELD_NAMES or field.name in _PROVIDER_POOL_CONFIG_FIELD_NAMES:
             continue
         value = _parse_visual_value(request, field, visual_values[field.name])
         _set_nested_value(updated, field.path, value)
@@ -2176,7 +2586,7 @@ def _config_section_id(title_key: str) -> str:
     return f"section-{slug}"
 
 
-def _render_config_field(request: web.Request, field: ConfigFieldSpec, value: Any) -> str:
+def _render_field_chrome(request: web.Request, field: ConfigFieldSpec) -> tuple[str, str]:
     label = escape(_t(request, field.label_key))
     tooltip_key = field.label_key.removesuffix("_label") + "_tooltip"
     badge_class = "restart" if field.restart_required else "hot"
@@ -2193,6 +2603,255 @@ def _render_config_field(request: web.Request, field: ConfigFieldSpec, value: An
     hint = ""
     if field.hint_key:
         hint = f'<div class="hint">{_th(request, field.hint_key)}</div>'
+    return label_row, hint
+
+
+def _provider_pool_rows(value: Any) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    if isinstance(value, list):
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                {
+                    "provider": str(item.get("provider", "") or ""),
+                    "model": str(item.get("model", "") or ""),
+                }
+            )
+    return rows or [{"provider": "", "model": ""}]
+
+
+def _provider_pool_options_html(request: web.Request, selected: str) -> str:
+    from nanobot.providers.registry import PROVIDERS
+
+    options = [
+        f'<option value="">{escape(_t(request, "admin_option_select_provider"))}</option>'
+    ]
+    for spec in PROVIDERS:
+        is_selected = " selected" if spec.name == selected else ""
+        options.append(f'<option value="{escape(spec.name)}"{is_selected}>{escape(spec.name)}</option>')
+    return "".join(options)
+
+
+def _render_provider_pool_row(
+    request: web.Request,
+    *,
+    field_name: str,
+    row: dict[str, str],
+) -> str:
+    provider_options = _provider_pool_options_html(request, row.get("provider", ""))
+    model_value = escape(row.get("model", ""))
+    return (
+        '<div class="provider-pool-row" data-provider-pool-row>'
+        f'<select name="{escape(field_name)}_provider">{provider_options}</select>'
+        f'<input type="text" name="{escape(field_name)}_model" value="{model_value}">'
+        '<div class="provider-pool-row-actions">'
+        f'<button type="button" class="ghost provider-pool-move" data-provider-pool-move-up>'
+        f'{escape(_t(request, "admin_provider_pool_move_up"))}</button>'
+        f'<button type="button" class="ghost provider-pool-move" data-provider-pool-move-down>'
+        f'{escape(_t(request, "admin_provider_pool_move_down"))}</button>'
+        f'<button type="button" class="ghost provider-pool-remove" data-provider-pool-remove>'
+        f'{escape(_t(request, "admin_provider_pool_remove"))}</button>'
+        "</div>"
+        "</div>"
+    )
+
+
+def _render_provider_pool_targets_field(
+    request: web.Request,
+    field: ConfigFieldSpec,
+    value: Any,
+) -> str:
+    label_row, hint = _render_field_chrome(request, field)
+    rows_html = "".join(
+        _render_provider_pool_row(request, field_name=field.name, row=row)
+        for row in _provider_pool_rows(value)
+    )
+    template_row = _render_provider_pool_row(
+        request,
+        field_name=field.name,
+        row={"provider": "", "model": ""},
+    )
+    return f"""
+        <div class="field full">
+          {label_row}
+          <div class="provider-pool-editor" data-provider-pool-editor>
+            <div class="provider-pool-head">
+              <span>{escape(_t(request, "admin_provider_pool_column_provider"))}</span>
+              <span>{escape(_t(request, "admin_provider_pool_column_model"))}</span>
+              <span>{escape(_t(request, "admin_provider_pool_column_actions"))}</span>
+            </div>
+            <div class="provider-pool-rows" data-provider-pool-rows>
+              {rows_html}
+            </div>
+            <template data-provider-pool-template>{template_row}</template>
+            <div class="actions provider-pool-actions">
+              <button type="button" class="ghost" data-provider-pool-add>
+                {escape(_t(request, "admin_provider_pool_add"))}
+              </button>
+            </div>
+          </div>
+          {hint}
+        </div>
+    """
+
+
+def _visual_value_present(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return bool(value)
+    if isinstance(value, list):
+        return bool(value)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return bool(value)
+
+
+def _provider_group_is_configured(values: dict[str, Any], field_names: tuple[str, ...]) -> bool:
+    return any(_visual_value_present(values.get(field_name)) for field_name in field_names)
+
+
+def _provider_group_configured_count(values: dict[str, Any], field_names: tuple[str, ...]) -> int:
+    return sum(1 for field_name in field_names if _visual_value_present(values.get(field_name)))
+
+
+def _compact_provider_url(value: str) -> str:
+    trimmed = value.strip()
+    if not trimmed:
+        return ""
+    parsed = urlsplit(trimmed)
+    if parsed.scheme and parsed.netloc:
+        compact = f"{parsed.netloc}{parsed.path}".rstrip("/")
+        if parsed.query:
+            compact = f"{compact}?{parsed.query}" if compact else parsed.query
+        return compact or parsed.netloc
+    return trimmed
+
+
+def _provider_header_count(raw_value: Any) -> int | None:
+    text = str(raw_value).strip()
+    if not text or text == "{}":
+        return 0
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    if isinstance(parsed, dict):
+        return len(parsed)
+    return None
+
+
+def _render_provider_group_chip(
+    text: str,
+    *,
+    code: bool = False,
+    title: str | None = None,
+) -> str:
+    css_class = "provider-group-chip code" if code else "provider-group-chip"
+    title_attr = f' title="{escape(title)}"' if title else ""
+    content = f"<code>{escape(text)}</code>" if code else escape(text)
+    return f'<span class="{css_class}"{title_attr}>{content}</span>'
+
+
+def _render_provider_group_summary(
+    request: web.Request,
+    *,
+    group_key: str,
+    field_names: tuple[str, ...],
+    values: dict[str, Any],
+) -> str:
+    items: list[str] = []
+    api_key_name = f"providers_{group_key}_api_key"
+    api_base_name = f"providers_{group_key}_api_base"
+
+    if api_key_name in field_names and _visual_value_present(values.get(api_key_name)):
+        items.append(_render_provider_group_chip(_t(request, "admin_provider_group_meta_api_key")))
+
+    api_base_value = str(values.get(api_base_name, "")).strip()
+    if api_base_name in field_names and api_base_value:
+        items.append(
+            _render_provider_group_chip(
+                _compact_provider_url(api_base_value),
+                code=True,
+                title=api_base_value,
+            )
+        )
+
+    if "providers_custom_extra_headers" in field_names:
+        header_count = _provider_header_count(values.get("providers_custom_extra_headers", ""))
+        if header_count:
+            items.append(
+                _render_provider_group_chip(
+                    _t(request, "admin_provider_group_meta_headers", count=header_count)
+                )
+            )
+        elif header_count is None and _visual_value_present(values.get("providers_custom_extra_headers")):
+            items.append(
+                _render_provider_group_chip(_t(request, "admin_provider_group_meta_headers_present"))
+            )
+
+    if not items:
+        configured_count = _provider_group_configured_count(values, field_names)
+        if configured_count:
+            items.append(
+                _render_provider_group_chip(
+                    _t(request, "admin_provider_group_meta_fields", count=configured_count)
+                )
+            )
+
+    if not items:
+        return ""
+    return (
+        f'<div class="provider-group-meta" data-provider-group-meta="{escape(group_key)}">'
+        f'{"".join(items)}'
+        "</div>"
+    )
+
+
+def _render_provider_groups_section(
+    request: web.Request,
+    *,
+    values: dict[str, Any],
+) -> str:
+    groups = []
+    for group_key, title_key, desc_key, field_names in _PROVIDER_CONFIG_GROUPS:
+        configured = _provider_group_is_configured(values, field_names)
+        open_attr = " open" if configured else ""
+        status_key = "admin_provider_group_configured" if configured else "admin_provider_group_empty"
+        status_class = "pill hot" if configured else "pill"
+        fields = "".join(
+            _render_config_field(request, _CONFIG_FIELD_MAP[field_name], values[field_name])
+            for field_name in field_names
+        )
+        summary = _render_provider_group_summary(
+            request,
+            group_key=group_key,
+            field_names=field_names,
+            values=values,
+        )
+        groups.append(
+            f'<details class="provider-group" data-provider-group="{escape(group_key)}"{open_attr}>'
+            "<summary>"
+            '<div class="provider-group-top">'
+            f'<h3 class="provider-group-title">{escape(_t(request, title_key))}</h3>'
+            f'<span class="{status_class}">{escape(_t(request, status_key))}</span>'
+            "</div>"
+            f'<div class="provider-group-desc">{_th(request, desc_key)}</div>'
+            f"{summary}"
+            "</summary>"
+            '<div class="provider-group-body">'
+            f'<div class="provider-group-fields">{fields}</div>'
+            "</div>"
+            "</details>"
+        )
+    return f'<div class="provider-groups">{"".join(groups)}</div>'
+
+
+def _render_config_field(request: web.Request, field: ConfigFieldSpec, value: Any) -> str:
+    label_row, hint = _render_field_chrome(request, field)
 
     if field.kind == "bool":
         checked = " checked" if bool(value) else ""
@@ -2202,6 +2861,9 @@ def _render_config_field(request: web.Request, field: ConfigFieldSpec, value: An
             f'<label class="toggle"><input type="checkbox" name="{escape(field.name)}" value="1"{checked}>'
             f"{label_row}</label>{hint}</div>"
         )
+
+    if field.kind == "provider_pool_targets":
+        return _render_provider_pool_targets_field(request, field, value)
 
     if field.kind in {"textarea", "json"}:
         rows = max(field.rows, 3)
@@ -2243,10 +2905,13 @@ def _render_config_section(
     values: dict[str, Any],
 ) -> str:
     section_id = _config_section_id(title_key)
-    fields = "".join(
-        _render_config_field(request, _CONFIG_FIELD_MAP[field_name], values[field_name])
-        for field_name in field_names
-    )
+    if title_key == "admin_config_section_providers_title":
+        fields = _render_provider_groups_section(request, values=values)
+    else:
+        fields = "".join(
+            _render_config_field(request, _CONFIG_FIELD_MAP[field_name], values[field_name])
+            for field_name in field_names
+        )
     return (
         f'<section id="{section_id}" class="card stack section-card">'
         '<div class="section-topline">'
@@ -2363,6 +3028,15 @@ async def _admin_index(request: web.Request) -> web.Response:
     config = _load_current_config(request)
     runtime_workspace = _runtime_workspace(request)
     config_workspace = config.workspace_path
+    provider_pool = config.agents.defaults.provider_pool
+    if provider_pool and provider_pool.targets:
+        provider_targets = ", ".join(target.provider for target in provider_pool.targets)
+        provider_summary = (
+            f"<strong><code>{escape(f'providerPool/{provider_pool.strategy}')}</code></strong>"
+            f'<div class="muted"><code>{escape(provider_targets)}</code></div>'
+        )
+    else:
+        provider_summary = f"<strong><code>{escape(config.agents.defaults.provider)}</code></strong>"
     mismatch = ""
     if config_workspace.resolve(strict=False) != runtime_workspace.resolve(strict=False):
         mismatch = f'<div class="notice error">{_th(request, "admin_overview_workspace_mismatch")}</div>'
@@ -2380,7 +3054,7 @@ async def _admin_index(request: web.Request) -> web.Response:
             </div>
             <div class="stat-card">
               <span>{escape(_t(request, "admin_label_provider"))}</span>
-              <strong><code>{escape(config.agents.defaults.provider)}</code></strong>
+              {provider_summary}
             </div>
             <div class="stat-card">
               <span>{escape(_t(request, "admin_label_config_workspace"))}</span>
@@ -2512,6 +3186,63 @@ def _render_config_page(
           </details>
         </div>
       </div>
+      <script>
+        (() => {{
+          const editors = Array.from(document.querySelectorAll("[data-provider-pool-editor]"));
+          if (!editors.length) return;
+
+          const createRow = (editor) => {{
+            const template = editor.querySelector("[data-provider-pool-template]");
+            if (!template) return null;
+            const wrapper = document.createElement("div");
+            wrapper.innerHTML = template.innerHTML.trim();
+            return wrapper.firstElementChild;
+          }};
+
+          const ensureRow = (editor) => {{
+            const rows = editor.querySelector("[data-provider-pool-rows]");
+            if (!rows) return;
+            if (!rows.querySelector("[data-provider-pool-row]")) {{
+              const row = createRow(editor);
+              if (row) rows.appendChild(row);
+            }}
+          }};
+
+          editors.forEach((editor) => {{
+            ensureRow(editor);
+            editor.addEventListener("click", (event) => {{
+              const row = event.target.closest("[data-provider-pool-row]");
+              const rows = editor.querySelector("[data-provider-pool-rows]");
+
+              const addButton = event.target.closest("[data-provider-pool-add]");
+              if (addButton) {{
+                const row = createRow(editor);
+                if (rows && row) rows.appendChild(row);
+                return;
+              }}
+
+              const moveUpButton = event.target.closest("[data-provider-pool-move-up]");
+              if (moveUpButton && rows && row) {{
+                const previous = row.previousElementSibling;
+                if (previous) rows.insertBefore(row, previous);
+                return;
+              }}
+
+              const moveDownButton = event.target.closest("[data-provider-pool-move-down]");
+              if (moveDownButton && rows && row) {{
+                const next = row.nextElementSibling;
+                if (next) rows.insertBefore(next, row);
+                return;
+              }}
+
+              const removeButton = event.target.closest("[data-provider-pool-remove]");
+              if (!removeButton) return;
+              if (row) row.remove();
+              ensureRow(editor);
+            }});
+          }});
+        }})();
+      </script>
     """
     return _page(
         title=_t(request, "admin_config_title"),
