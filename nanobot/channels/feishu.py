@@ -7,7 +7,9 @@ import os
 import re
 import threading
 import time
+import uuid
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -27,6 +29,18 @@ MSG_TYPE_MAP = {
     "file": "[file]",
     "sticker": "[sticker]",
 }
+
+_STREAM_ELEMENT_ID = "streaming_md"
+
+
+@dataclass
+class _FeishuStreamBuf:
+    """Per-chat streaming accumulator using CardKit streaming API."""
+
+    text: str = ""
+    card_id: str | None = None
+    sequence: int = 0
+    last_edit: float = 0.0
 
 
 def _extract_share_card_content(content_json: dict, msg_type: str) -> str:
@@ -266,6 +280,16 @@ class FeishuChannel(BaseChannel):
         self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
 
     @staticmethod
+    async def _run_blocking(func, /, *args, **kwargs):
+        """Run blocking Feishu SDK work.
+
+        The usual threadpool offload path (`asyncio.to_thread` / executors)
+        can hang in some deployment/test environments here, so Feishu falls
+        back to direct execution for reliability.
+        """
+        return func(*args, **kwargs)
+
+    @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
         """Register an event handler only when the SDK supports it."""
         method = getattr(builder, method_name, None)
@@ -418,8 +442,7 @@ class FeishuChannel(BaseChannel):
         if not self._client:
             return
 
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+        await self._run_blocking(self._add_reaction_sync, message_id, emoji_type)
 
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
@@ -792,7 +815,6 @@ class FeishuChannel(BaseChannel):
         Returns:
             (file_path, content_text) - file_path is None if download failed
         """
-        loop = asyncio.get_running_loop()
         media_dir = get_media_dir("feishu")
 
         data, filename = None, None
@@ -800,8 +822,8 @@ class FeishuChannel(BaseChannel):
         if msg_type == "image":
             image_key = content_json.get("image_key")
             if image_key and message_id:
-                data, filename = await loop.run_in_executor(
-                    None, self._download_image_sync, message_id, image_key
+                data, filename = await self._run_blocking(
+                    self._download_image_sync, message_id, image_key
                 )
                 if not filename:
                     filename = f"{image_key[:16]}.jpg"
@@ -809,8 +831,8 @@ class FeishuChannel(BaseChannel):
         elif msg_type in ("audio", "file", "media"):
             file_key = content_json.get("file_key")
             if file_key and message_id:
-                data, filename = await loop.run_in_executor(
-                    None, self._download_file_sync, message_id, file_key, msg_type
+                data, filename = await self._run_blocking(
+                    self._download_file_sync, message_id, file_key, msg_type
                 )
                 if not filename:
                     filename = file_key[:16]
@@ -957,7 +979,10 @@ class FeishuChannel(BaseChannel):
 
     def _stream_update_text_sync(self, card_id: str, content: str, sequence: int) -> bool:
         """Stream-update the markdown element on a CardKit card (typewriter effect)."""
-        from lark_oapi.api.cardkit.v1 import ContentCardElementRequest, ContentCardElementRequestBody
+        from lark_oapi.api.cardkit.v1 import (
+            ContentCardElementRequest,
+            ContentCardElementRequestBody,
+        )
         try:
             request = ContentCardElementRequest.builder() \
                 .card_id(card_id) \
@@ -1011,7 +1036,6 @@ class FeishuChannel(BaseChannel):
         if not self._client:
             return
         meta = metadata or {}
-        loop = asyncio.get_running_loop()
         rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
         # --- stream end: final update or fallback ---
@@ -1021,18 +1045,20 @@ class FeishuChannel(BaseChannel):
                 return
             if buf.card_id:
                 buf.sequence += 1
-                await loop.run_in_executor(
-                    None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
+                await self._run_blocking(
+                    self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
                 )
                 # Required so the chat list preview exits the streaming placeholder (Feishu streaming card docs).
                 buf.sequence += 1
-                await loop.run_in_executor(
-                    None, self._close_streaming_mode_sync, buf.card_id, buf.sequence,
+                await self._run_blocking(
+                    self._close_streaming_mode_sync, buf.card_id, buf.sequence,
                 )
             else:
                 for chunk in self._split_elements_by_table_limit(self._build_card_elements(buf.text)):
                     card = json.dumps({"config": {"wide_screen_mode": True}, "elements": chunk}, ensure_ascii=False)
-                    await loop.run_in_executor(None, self._send_message_sync, rid_type, chat_id, "interactive", card)
+                    await self._run_blocking(
+                        self._send_message_sync, rid_type, chat_id, "interactive", card
+                    )
             return
 
         # --- accumulate delta ---
@@ -1046,15 +1072,17 @@ class FeishuChannel(BaseChannel):
 
         now = time.monotonic()
         if buf.card_id is None:
-            card_id = await loop.run_in_executor(None, self._create_streaming_card_sync, rid_type, chat_id)
+            card_id = await self._run_blocking(self._create_streaming_card_sync, rid_type, chat_id)
             if card_id:
                 buf.card_id = card_id
                 buf.sequence = 1
-                await loop.run_in_executor(None, self._stream_update_text_sync, card_id, buf.text, 1)
+                await self._run_blocking(self._stream_update_text_sync, card_id, buf.text, 1)
                 buf.last_edit = now
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
             buf.sequence += 1
-            await loop.run_in_executor(None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence)
+            await self._run_blocking(
+                self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence
+            )
             buf.last_edit = now
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -1065,7 +1093,6 @@ class FeishuChannel(BaseChannel):
 
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
-            loop = asyncio.get_running_loop()
 
             if msg.metadata.get("_tool_hint"):
                 if msg.content and msg.content.strip():
@@ -1097,14 +1124,14 @@ class FeishuChannel(BaseChannel):
                     continue
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in self._IMAGE_EXTS:
-                    key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
+                    key = await self._run_blocking(self._upload_image_sync, file_path)
                     if key:
-                        await loop.run_in_executor(
-                            None, _do_send,
+                        await self._run_blocking(
+                            _do_send,
                             "image", json.dumps({"image_key": key}, ensure_ascii=False),
                         )
                 else:
-                    key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
+                    key = await self._run_blocking(self._upload_file_sync, file_path)
                     if key:
                         # Use msg_type "audio" for audio, "video" for video, "file" for documents.
                         # Feishu requires these specific msg_types for inline playback.
@@ -1115,8 +1142,8 @@ class FeishuChannel(BaseChannel):
                             media_type = "video"
                         else:
                             media_type = "file"
-                        await loop.run_in_executor(
-                            None, _do_send,
+                        await self._run_blocking(
+                            _do_send,
                             media_type, json.dumps({"file_key": key}, ensure_ascii=False),
                         )
 
@@ -1126,20 +1153,20 @@ class FeishuChannel(BaseChannel):
                 if fmt == "text":
                     # Short plain text – send as simple text message
                     text_body = json.dumps({"text": msg.content.strip()}, ensure_ascii=False)
-                    await loop.run_in_executor(None, _do_send, "text", text_body)
+                    await self._run_blocking(_do_send, "text", text_body)
 
                 elif fmt == "post":
                     # Medium content with links – send as rich-text post
                     post_body = self._markdown_to_post(msg.content)
-                    await loop.run_in_executor(None, _do_send, "post", post_body)
+                    await self._run_blocking(_do_send, "post", post_body)
 
                 else:
                     # Complex / long content – send as interactive card
                     elements = self._build_card_elements(msg.content)
                     for chunk in self._split_elements_by_table_limit(elements):
                         card = {"config": {"wide_screen_mode": True}, "elements": chunk}
-                        await loop.run_in_executor(
-                            None, _do_send,
+                        await self._run_blocking(
+                            _do_send,
                             "interactive", json.dumps(card, ensure_ascii=False),
                         )
 
@@ -1161,7 +1188,7 @@ class FeishuChannel(BaseChannel):
             event = data.event
             message = event.message
             sender = event.sender
-            
+
             # Deduplication check
             message_id = message.message_id
             if message_id in self._processed_message_ids:
@@ -1241,8 +1268,7 @@ class FeishuChannel(BaseChannel):
             thread_id = getattr(message, "thread_id", None) or None
 
             if parent_id and self._client:
-                loop = asyncio.get_running_loop()
-                reply_ctx = await loop.run_in_executor(None, self._get_message_content_sync, parent_id)
+                reply_ctx = await self._run_blocking(self._get_message_content_sync, parent_id)
                 if reply_ctx:
                     content_parts.insert(0, reply_ctx)
 
@@ -1332,7 +1358,6 @@ class FeishuChannel(BaseChannel):
 
     async def _send_tool_hint_card(self, receive_id_type: str, receive_id: str, tool_hint: str) -> None:
         """Send tool hint as an interactive card with a formatted code block."""
-        loop = asyncio.get_running_loop()
         formatted_code = self._format_tool_hint_lines(tool_hint)
 
         card = {
@@ -1345,8 +1370,7 @@ class FeishuChannel(BaseChannel):
             ],
         }
 
-        await loop.run_in_executor(
-            None,
+        await self._run_blocking(
             self._send_message_sync,
             receive_id_type,
             receive_id,

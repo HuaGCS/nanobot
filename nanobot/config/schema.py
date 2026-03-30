@@ -89,6 +89,7 @@ class FeishuConfig(Base):
     )
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned, "open" responds to all
     reply_to_message: bool = False  # If true, replies quote the original Feishu message
+    streaming: bool = True  # Progressive edit-based streaming for final text replies
 
 
 class FeishuInstanceConfig(FeishuConfig):
@@ -216,6 +217,8 @@ class EmailConfig(Base):
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
+    verify_dkim: bool = True  # Require Authentication-Results with dkim=pass
+    verify_spf: bool = True  # Require Authentication-Results with spf=pass
 
 
 class EmailInstanceConfig(EmailConfig):

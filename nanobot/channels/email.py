@@ -21,10 +21,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import EmailConfig, EmailInstanceConfig
 
-    # Email authentication verification (anti-spoofing)
-    verify_dkim: bool = True   # Require Authentication-Results with dkim=pass
-    verify_spf: bool = True    # Require Authentication-Results with spf=pass
-
 
 class EmailChannel(BaseChannel):
     """
