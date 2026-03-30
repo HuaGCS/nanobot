@@ -48,7 +48,13 @@ class SystemCommandHandler:
         self.loop.sessions.invalidate(session.key)
 
         if snapshot:
-            self.loop._schedule_background(self.loop.memory_consolidator.archive_messages(session, snapshot))
+            self.loop._schedule_background(
+                self.loop.memory_consolidator.archive_messages(
+                    session,
+                    snapshot,
+                    source="new_session",
+                )
+            )
 
         return self._response(msg, text(language, "new_session_started"))
 

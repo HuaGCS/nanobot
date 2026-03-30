@@ -44,6 +44,7 @@ from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.history import HistoryExpandTool, HistorySearchTool
 from nanobot.agent.tools.image_gen import ImageGenTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -500,6 +501,11 @@ class AgentLoop:
         if web_fetch_tool := self.tools.get("web_fetch"):
             web_fetch_tool.proxy = self.web_proxy
 
+        for name in ("history_search", "history_expand"):
+            if tool := self.tools.get(name):
+                if hasattr(tool, "update_workspace"):
+                    tool.update_workspace(self.workspace)
+
         if cron_tool := self.tools.get("cron"):
             if hasattr(cron_tool, "set_default_timezone"):
                 cron_tool.set_default_timezone(self.context.timezone or "UTC")
@@ -773,6 +779,8 @@ class AgentLoop:
             )
         )
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        self.tools.register(HistorySearchTool(workspace=self.workspace))
+        self.tools.register(HistoryExpandTool(workspace=self.workspace))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         self._sync_image_gen_tool()
@@ -813,10 +821,15 @@ class AgentLoop:
         persona: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "history_search", "history_expand"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name == "message":
+                        tool.set_context(channel, chat_id, message_id)
+                    elif name in ("history_search", "history_expand"):
+                        tool.set_context(channel, chat_id, persona)
+                    else:
+                        tool.set_context(channel, chat_id)
         if image_tool := self.tools.get("image_gen"):
             if hasattr(image_tool, "set_persona"):
                 image_tool.set_persona(persona)

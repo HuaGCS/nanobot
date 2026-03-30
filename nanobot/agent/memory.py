@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from nanobot.agent.history_archive import HistoryArchiveStore
 from nanobot.agent.i18n import DEFAULT_LANGUAGE, resolve_language
 from nanobot.agent.personas import DEFAULT_PERSONA, persona_workspace, resolve_persona_name
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
@@ -120,6 +121,8 @@ class MemoryStore:
         messages: list[dict],
         provider: LLMProvider,
         model: str,
+        *,
+        on_archive: Callable[[dict[str, Any]], None] | None = None,
     ) -> bool:
         """Consolidate the provided message chunk into MEMORY.md + HISTORY.md."""
         if not messages:
@@ -167,57 +170,90 @@ class MemoryStore:
                     len(response.content or ""),
                     (response.content or "")[:200],
                 )
-                return self._fail_or_raw_archive(messages)
+                return self._fail_or_raw_archive(messages, on_archive=on_archive)
 
             args = _normalize_save_memory_args(response.tool_calls[0].arguments)
             if args is None:
                 logger.warning("Memory consolidation: unexpected save_memory arguments")
-                return self._fail_or_raw_archive(messages)
+                return self._fail_or_raw_archive(messages, on_archive=on_archive)
 
             if "history_entry" not in args or "memory_update" not in args:
                 logger.warning("Memory consolidation: save_memory payload missing required fields")
-                return self._fail_or_raw_archive(messages)
+                return self._fail_or_raw_archive(messages, on_archive=on_archive)
 
             entry = args["history_entry"]
             update = args["memory_update"]
 
             if entry is None or update is None:
                 logger.warning("Memory consolidation: save_memory payload contains null required fields")
-                return self._fail_or_raw_archive(messages)
+                return self._fail_or_raw_archive(messages, on_archive=on_archive)
 
             entry = _ensure_text(entry).strip()
             if not entry:
                 logger.warning("Memory consolidation: history_entry is empty after normalization")
-                return self._fail_or_raw_archive(messages)
+                return self._fail_or_raw_archive(messages, on_archive=on_archive)
 
             self.append_history(entry)
             update = _ensure_text(update)
             if update != current_memory:
                 self.write_long_term(update)
+            if on_archive is not None:
+                try:
+                    on_archive(
+                        {
+                            "history_entry": entry,
+                            "memory_update": update,
+                            "raw_archive": False,
+                        }
+                    )
+                except Exception:
+                    logger.exception("History archive callback failed after consolidation")
 
             self._consecutive_failures = 0
             logger.info("Memory consolidation done for {} messages", len(messages))
             return True
         except Exception:
             logger.exception("Memory consolidation failed")
-            return self._fail_or_raw_archive(messages)
+            return self._fail_or_raw_archive(messages, on_archive=on_archive)
 
-    def _fail_or_raw_archive(self, messages: list[dict]) -> bool:
+    def _fail_or_raw_archive(
+        self,
+        messages: list[dict],
+        *,
+        on_archive: Callable[[dict[str, Any]], None] | None = None,
+    ) -> bool:
         """Increment failure count; after threshold, raw-archive messages and return True."""
         self._consecutive_failures += 1
         if self._consecutive_failures < self._MAX_FAILURES_BEFORE_RAW_ARCHIVE:
             return False
-        self._raw_archive(messages)
+        self._raw_archive(messages, on_archive=on_archive)
         self._consecutive_failures = 0
         return True
 
-    def _raw_archive(self, messages: list[dict]) -> None:
+    def _raw_archive(
+        self,
+        messages: list[dict],
+        *,
+        on_archive: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         """Fallback: dump raw messages to HISTORY.md without LLM summarization."""
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        self.append_history(
+        entry = (
             f"[{ts}] [RAW] {len(messages)} messages\n"
             f"{self._format_messages(messages)}"
         )
+        self.append_history(entry)
+        if on_archive is not None:
+            try:
+                on_archive(
+                    {
+                        "history_entry": entry,
+                        "memory_update": self.read_long_term(),
+                        "raw_archive": True,
+                    }
+                )
+            except Exception:
+                logger.exception("History archive callback failed after raw archive fallback")
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
         )
@@ -255,6 +291,10 @@ class MemoryConsolidator:
             "memory_consolidation_session",
             default=None,
         )
+        self._archive_callbacks: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = (
+            contextvars.ContextVar("memory_archive_callback", default=None)
+        )
+        self._archive_stores: dict[Path, HistoryArchiveStore] = {}
 
     def _get_persona(self, session: Session) -> str:
         """Resolve the active persona for a session."""
@@ -276,11 +316,18 @@ class MemoryConsolidator:
         store_root = persona_workspace(self.workspace, DEFAULT_PERSONA)
         return self._stores.setdefault(store_root, MemoryStore(store_root))
 
+    def _get_archive_store(self, session: Session | None) -> HistoryArchiveStore:
+        """Return the structured archive store for the active persona."""
+        persona = self._get_persona(session) if session is not None else DEFAULT_PERSONA
+        store_root = persona_workspace(self.workspace, persona)
+        return self._archive_stores.setdefault(store_root, HistoryArchiveStore(self.workspace, persona))
+
     def rebind_runtime(self, *, workspace: Path, sessions: SessionManager) -> None:
         """Update workspace/session bindings after a runtime workspace switch."""
         self.workspace = workspace
         self.sessions = sessions
         self._stores.clear()
+        self._archive_stores.clear()
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
@@ -290,7 +337,32 @@ class MemoryConsolidator:
         """Archive a selected message chunk into persistent memory."""
         session = self._active_session.get()
         store = self._get_store(session) if session is not None else self._get_default_store()
-        return await store.consolidate(messages, self.provider, self.model)
+        return await store.consolidate(
+            messages,
+            self.provider,
+            self.model,
+            on_archive=self._archive_callbacks.get(),
+        )
+
+    def _make_archive_callback(
+        self,
+        session: Session,
+        messages: list[dict[str, object]],
+        *,
+        source: str,
+    ) -> Callable[[dict[str, Any]], None]:
+        """Build the sidecar archive writer for one chunk."""
+
+        def _callback(payload: dict[str, Any]) -> None:
+            self._get_archive_store(session).write_archive(
+                session_key=session.key,
+                messages=messages,
+                history_entry=str(payload.get("history_entry", "")).strip(),
+                source=source,
+                raw_archive=bool(payload.get("raw_archive")),
+            )
+
+        return _callback
 
     def pick_consolidation_boundary(
         self,
@@ -337,33 +409,50 @@ class MemoryConsolidator:
         self,
         session: Session,
         messages: list[dict[str, object]],
+        *,
+        source: str,
     ) -> bool:
         """Archive messages with guaranteed persistence (retries until raw-dump fallback)."""
         if not messages:
             return True
         token = self._active_session.set(session)
+        cb_token = self._archive_callbacks.set(
+            self._make_archive_callback(session, messages, source=source)
+        )
         try:
             for _ in range(self._get_store(session)._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
                 if await self.consolidate_messages(messages):
                     return True
         finally:
+            self._archive_callbacks.reset(cb_token)
             self._active_session.reset(token)
         return True
 
-    async def archive_messages(self, session: Session, messages: list[dict[str, object]]) -> bool:
+    async def archive_messages(
+        self,
+        session: Session,
+        messages: list[dict[str, object]],
+        *,
+        source: str = "session_archive",
+    ) -> bool:
         """Archive messages in the background with session-scoped memory persistence."""
         lock = self.get_lock(session.key)
         async with lock:
-            return await self._archive_messages_locked(session, messages)
+            return await self._archive_messages_locked(session, messages, source=source)
 
-    async def archive_unconsolidated(self, session: Session) -> bool:
+    async def archive_unconsolidated(
+        self,
+        session: Session,
+        *,
+        source: str = "persona_switch",
+    ) -> bool:
         """Archive the full unconsolidated tail for persona switch and similar rollover flows."""
         lock = self.get_lock(session.key)
         async with lock:
             snapshot = session.messages[session.last_consolidated:]
             if not snapshot:
                 return True
-            return await self._archive_messages_locked(session, snapshot)
+            return await self._archive_messages_locked(session, snapshot, source=source)
 
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
@@ -419,10 +508,14 @@ class MemoryConsolidator:
                     len(chunk),
                 )
                 token = self._active_session.set(session)
+                cb_token = self._archive_callbacks.set(
+                    self._make_archive_callback(session, chunk, source="token_consolidation")
+                )
                 try:
                     if not await self.consolidate_messages(chunk):
                         return
                 finally:
+                    self._archive_callbacks.reset(cb_token)
                     self._active_session.reset(token)
                 session.last_consolidated = end_idx
                 self.sessions.save(session)

@@ -65,6 +65,7 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - The implicit default workspace is `<config-dir>/workspace`. If `agents.defaults.workspace` is empty, keep workspace resolution tied to the active config path instead of a separate global default.
 - Workspace skills in `<workspace>/skills/` take precedence over built-in skills with the same directory name.
 - Built-in skills now include `translate`, `living-together`, `emotional-companion`, and `memorix`. Keep them aligned with the existing skill loader and current built-in tool surface instead of importing NanoMate-only runtime assumptions.
+- File memory now also writes structured archive sidecars under `<persona-workspace>/memory/archive/`. Prefer `history_search` / `history_expand` for archived conversation recall, and keep `HISTORY.md` grep as a fallback path.
 - When Memorix MCP tools are connected, auto-load the built-in `memorix` skill and call `memorix_session_start` with the active workspace as `projectRoot` once per runtime MCP connection and chat session. Keep Memorix scoped to workspace/code memory instead of user-profile memory.
 - `nanobot persona import-st-card <file>` imports a SillyTavern character card into `<workspace>/personas/<name>/` by generating `SOUL.md`, `USER.md`, `memory/`, and persona-local metadata under `.nanobot/`.
 - `nanobot persona import-st-preset <file> --persona <name>` imports a SillyTavern preset into an existing persona by generating `STYLE.md` plus `.nanobot/st_preset.json`.

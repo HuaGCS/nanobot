@@ -1619,6 +1619,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.workspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
 `agents.defaults.providerPool` also requires a restart because it changes provider routing.
 During long tool-using turns, nanobot now compacts older tool results on demand so the system prompt, long-term memory, and recent working context stay inside the active context window.
+When old conversation chunks are consolidated, nanobot now also keeps structured archive sidecars under `memory/archive/` so the agent can use `history_search` and `history_expand` to recall archived details after `/new`, persona switches, or long-token compaction.
 
 ### Memorix via MCP
 
@@ -1962,6 +1963,8 @@ The importer writes into `<workspace>/personas/<name>/` and generates:
 - `USER.md`
 - `memory/MEMORY.md`
 - `memory/HISTORY.md`
+- `memory/archive/index.jsonl`
+- `memory/archive/chunks/*.json`
 - `.nanobot/st_character.json`
 - `.nanobot/st_manifest.json`
 

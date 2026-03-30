@@ -919,6 +919,7 @@ nanobot 支持 [MCP](https://modelcontextprotocol.io/)。
 
 [Memorix](https://github.com/AVIDS2/memorix) 更适合作为工作区 / 代码库记忆层，而不是用户长期画像记忆。
 建议通过 `tools.mcpServers` 接入，并继续保留当前文件式 `memory/MEMORY.md` 作为用户长期记忆主路径。
+旧对话在被压缩归档时，nanobot 现在也会把结构化副本写到 `memory/archive/`，这样 agent 可以通过 `history_search` / `history_expand` 回放历史细节，而不只依赖 `HISTORY.md` 的 grep 检索。
 
 stdio 示例：
 

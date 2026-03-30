@@ -63,7 +63,10 @@ class PersonaCommandHandler:
             return self._response(msg, text(language, "persona_already_active", persona=target))
 
         try:
-            if not await self.loop.memory_consolidator.archive_unconsolidated(session):
+            if not await self.loop.memory_consolidator.archive_unconsolidated(
+                session,
+                source="persona_switch",
+            ):
                 return self._response(msg, text(language, "memory_archival_failed_persona"))
             await self.loop._flush_memory_session(
                 session,
