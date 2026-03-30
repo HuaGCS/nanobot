@@ -876,6 +876,101 @@ nanobot 支持 [MCP](https://modelcontextprotocol.io/)。
 - `url` + `headers`
   远程 HTTP
 
+### 通过 MCP 接入 Memorix
+
+[Memorix](https://github.com/AVIDS2/memorix) 更适合作为工作区 / 代码库记忆层，而不是用户长期画像记忆。
+建议通过 `tools.mcpServers` 接入，并继续保留当前文件式 `memory/MEMORY.md` 作为用户长期记忆主路径。
+
+stdio 示例：
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "memorix": {
+        "command": "memorix",
+        "args": ["serve"],
+        "toolTimeout": 60
+      }
+    }
+  }
+}
+```
+
+HTTP 示例：
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "memorix": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:3211/mcp",
+        "toolTimeout": 60
+      }
+    }
+  }
+}
+```
+
+当 Memorix 工具可用时，nanobot 会自动：
+
+- 把内置 `memorix` skill 注入系统提示
+- 在每个 runtime MCP 连接 / chat session 首次使用时调用一次 `memorix_session_start`
+- 把当前 nanobot workspace 作为 `projectRoot` 绑定给 Memorix
+
+这意味着项目历史、设计原因、排障经验等问题可以直接利用 Memorix，但不会替代当前文件记忆主链路。
+如果你使用内置 admin 页面，现在也可以直接在可视化配置里编辑专门的 `Memorix MCP` 分区。
+
+### Mem0 预留配置
+
+`memory.user.mem0` 目前仍然只是预留配置结构，不会因为填了 key、url 或 model 就自动启用 Mem0 运行时后端。
+
+当前建议形态：
+
+- `llm`、`embedder`、`vectorStore` 优先使用显式字段：`provider`、`apiKey`、`url`、`model`
+- `headers`、`config` 作为高级扩展对象保留
+- 顶层 `metadata` 可用于后续接入时补充租户、环境或标签信息
+
+示例：
+
+```json
+{
+  "memory": {
+    "user": {
+      "shadowWriteMem0": false,
+      "mem0": {
+        "llm": {
+          "provider": "openai",
+          "apiKey": "mem0-llm-key",
+          "url": "https://api.mem0.ai/v1",
+          "model": "gpt-4.1-mini"
+        },
+        "embedder": {
+          "provider": "openai",
+          "apiKey": "mem0-embed-key",
+          "url": "https://embed.mem0.ai/v1",
+          "model": "text-embedding-3-small"
+        },
+        "vectorStore": {
+          "provider": "qdrant",
+          "apiKey": "mem0-vs-key",
+          "url": "https://qdrant.mem0.ai",
+          "config": {
+            "collectionName": "nanobot_user_memory"
+          }
+        },
+        "metadata": {
+          "tenant": "prod"
+        }
+      }
+    }
+  }
+}
+```
+
+如果你使用内置 admin 页面，现在也可以直接在可视化配置里编辑 `Mem0 预留配置` 分区，包括常用字段和 `headers` / `config` / `metadata` 的 JSON textarea。
+
 ### 安全
 
 生产环境建议：
@@ -921,6 +1016,8 @@ nanobot 支持 [MCP](https://modelcontextprotocol.io/)。
 当前 admin 页面支持：
 
 - 可视化编辑并校验 `config.json`，同时保留高级 JSON 兜底编辑器
+- 可视化编辑专门的 `Memorix MCP` 分区，对应 `tools.mcpServers.memorix`
+- 可视化编辑 `Mem0 预留配置` 分区，对应 `memory.user.mem0`
 - 独立的命令总览页，展示所有聊天 slash 命令、别名和用法
 - 每个可视化配置项都带悬浮说明，鼠标移动到字段名即可查看详细解释
 - 每个可视化配置项都会直接标注“可热重载”或“需重启”

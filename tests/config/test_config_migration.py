@@ -59,6 +59,86 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
     assert "memoryWindow" not in defaults
 
 
+def test_save_config_persists_memory_shadow_write_settings(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = load_config(config_path)
+    config.memory.user.shadow_write_mem0 = True
+    config.memory.user.mem0.llm.provider = "ollama"
+    config.memory.user.mem0.llm.model = "qwen3:8b"
+    config.memory.user.mem0.embedder.provider = "openai"
+    config.memory.user.mem0.embedder.api_key = "embed-key"
+    config.memory.user.mem0.embedder.url = "https://embed.example.com/v1"
+    config.memory.user.mem0.vector_store.provider = "qdrant"
+    config.memory.user.mem0.vector_store.url = "https://qdrant.example.com"
+    config.memory.user.mem0.vector_store.headers = {"Authorization": "Bearer test"}
+    config.memory.user.mem0.vector_store.config = {"collectionName": "nanobot_user_memory"}
+
+    save_config(config, config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert saved["memory"]["user"]["shadowWriteMem0"] is True
+    assert saved["memory"]["user"]["mem0"]["llm"]["provider"] == "ollama"
+    assert saved["memory"]["user"]["mem0"]["llm"]["model"] == "qwen3:8b"
+    assert saved["memory"]["user"]["mem0"]["embedder"]["apiKey"] == "embed-key"
+    assert saved["memory"]["user"]["mem0"]["embedder"]["url"] == "https://embed.example.com/v1"
+    assert saved["memory"]["user"]["mem0"]["vectorStore"]["url"] == "https://qdrant.example.com"
+    assert saved["memory"]["user"]["mem0"]["vectorStore"]["headers"] == {
+        "Authorization": "Bearer test"
+    }
+    assert saved["memory"]["user"]["mem0"]["vectorStore"]["config"]["collectionName"] == (
+        "nanobot_user_memory"
+    )
+
+
+def test_load_config_parses_reserved_mem0_provider_api_fields(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "memory": {
+                    "user": {
+                        "mem0": {
+                            "llm": {
+                                "provider": "openai",
+                                "apiKey": "llm-key",
+                                "url": "https://llm.example.com/v1",
+                                "model": "gpt-4.1-mini",
+                            },
+                            "embedder": {
+                                "provider": "openai",
+                                "apiKey": "embed-key",
+                                "url": "https://embed.example.com/v1",
+                                "model": "text-embedding-3-small",
+                            },
+                            "vectorStore": {
+                                "provider": "qdrant",
+                                "url": "https://qdrant.example.com",
+                                "headers": {"api-key": "qdrant-key"},
+                                "config": {"collectionName": "nanobot_user_memory"},
+                            },
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.memory.user.mem0.llm.api_key == "llm-key"
+    assert config.memory.user.mem0.llm.url == "https://llm.example.com/v1"
+    assert config.memory.user.mem0.llm.model == "gpt-4.1-mini"
+    assert config.memory.user.mem0.embedder.api_key == "embed-key"
+    assert config.memory.user.mem0.embedder.url == "https://embed.example.com/v1"
+    assert config.memory.user.mem0.embedder.model == "text-embedding-3-small"
+    assert config.memory.user.mem0.vector_store.url == "https://qdrant.example.com"
+    assert config.memory.user.mem0.vector_store.headers == {"api-key": "qdrant-key"}
+    assert config.memory.user.mem0.vector_store.config == {
+        "collectionName": "nanobot_user_memory"
+    }
+
+
 def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     workspace = tmp_path / "workspace"

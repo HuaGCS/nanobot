@@ -30,6 +30,9 @@ from nanobot.agent.i18n import (
     text,
 )
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.memory_backends.file_backend import FileUserMemoryBackend
+from nanobot.agent.memory_models import MemoryCommitRequest, MemoryScope
+from nanobot.agent.memory_router import MemoryRouter
 from nanobot.agent.personas import (
     build_persona_voice_instructions,
     load_persona_response_filter_tags,
@@ -60,7 +63,7 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import ensure_dir, estimate_prompt_tokens_chain, safe_filename
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ImageGenConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ImageGenConfig, MemoryConfig
     from nanobot.cron.service import CronService
 
 
@@ -98,6 +101,7 @@ class AgentLoop:
     _CLAWHUB_SEARCH_TIMEOUT_SECONDS = 15.0
     _CLAWHUB_SEARCH_LIMIT = 5
     _CLAWHUB_NPM_CACHE_DIR = Path(tempfile.gettempdir()) / "nanobot-npm-cache"
+    _MEMORIX_CONTEXT_MAX_CHARS = 4_000
     _PREFLIGHT_CONSOLIDATION_BUDGET_SECONDS = 1.5
     _CONTEXT_TOOL_RESULT_CHAR_STEPS = (16_000, 8_000, 4_000, 2_000, 1_000, 500, 200, 0)
     _CONTEXT_TOOL_RESULT_OMIT = "[tool result omitted to stay within context window]"
@@ -119,6 +123,7 @@ class AgentLoop:
         web_search_max_results: int = 5,
         exec_config: ExecToolConfig | None = None,
         image_gen_config: ImageGenConfig | None = None,
+        memory_config: MemoryConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -126,7 +131,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, ImageGenConfig
+        from nanobot.config.schema import ExecToolConfig, ImageGenConfig, MemoryConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -142,6 +147,7 @@ class AgentLoop:
         self.web_search_max_results = web_search_max_results
         self.exec_config = exec_config or ExecToolConfig()
         self.image_gen_config = image_gen_config or ImageGenConfig()
+        self.memory_config = memory_config or MemoryConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
@@ -181,6 +187,9 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
+        self._mcp_connection_epoch = 0
+        self._memorix_started_sessions: set[tuple[int, str, str, str]] = set()
+        self._memorix_session_context: dict[tuple[int, str, str, str], str] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: set[asyncio.Task] = set()
         self._token_consolidation_tasks: dict[str, asyncio.Task[None]] = {}
@@ -200,6 +209,7 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
         )
+        self._configure_memory_router()
         self._register_default_tools()
 
     def _get_session_persona(self, session: Session) -> str:
@@ -211,6 +221,72 @@ class AgentLoop:
         metadata = getattr(session, "metadata", {})
         raw = metadata.get("language") if isinstance(metadata, dict) else DEFAULT_LANGUAGE
         return resolve_language(raw)
+
+    def _memory_scope(
+        self,
+        session: Session,
+        *,
+        channel: str,
+        chat_id: str,
+        sender_id: str | None,
+        persona: str | None = None,
+        language: str | None = None,
+    ) -> MemoryScope:
+        """Build the normalized scope used by memory backends."""
+        return MemoryScope(
+            workspace=self.workspace,
+            session_key=session.key,
+            channel=channel,
+            chat_id=chat_id,
+            sender_id=sender_id,
+            persona=persona or self._get_session_persona(session),
+            language=language or self._get_session_language(session),
+        )
+
+    async def _commit_memory_turn(
+        self,
+        *,
+        scope: MemoryScope,
+        inbound_content: Any | None,
+        outbound_content: str | None,
+        persisted_messages: list[dict[str, Any]],
+    ) -> None:
+        """Forward a completed turn to the memory router without blocking replies on failures."""
+        try:
+            await self.memory_router.commit_turn(
+                MemoryCommitRequest(
+                    scope=scope,
+                    inbound_content=inbound_content,
+                    outbound_content=outbound_content,
+                    persisted_messages=tuple(persisted_messages),
+                )
+            )
+        except Exception:
+            logger.exception("Memory router commit failed for {}", scope.session_key)
+
+    async def _flush_memory_session(
+        self,
+        session: Session,
+        *,
+        channel: str,
+        chat_id: str,
+        sender_id: str | None,
+        persona: str | None = None,
+        language: str | None = None,
+    ) -> None:
+        """Flush buffered memory state before persona/session transitions."""
+        scope = self._memory_scope(
+            session,
+            channel=channel,
+            chat_id=chat_id,
+            sender_id=sender_id,
+            persona=persona,
+            language=language,
+        )
+        try:
+            await self.memory_router.flush_session(scope)
+        except Exception:
+            logger.exception("Memory router flush failed for {}", scope.session_key)
 
     def _set_session_persona(self, session: Session, persona: str) -> None:
         """Persist the selected persona for a session."""
@@ -260,6 +336,124 @@ class AgentLoop:
             dumped[name] = cfg.model_dump() if hasattr(cfg, "model_dump") else cfg
         return dumped
 
+    def _mcp_tool_candidates(self, suffix: str) -> list[str]:
+        """Return MCP tool names matching a logical tool suffix."""
+        expected = f"_{suffix}"
+        return sorted(
+            name
+            for name in self.tools.tool_names
+            if name.startswith("mcp_") and name.endswith(expected)
+        )
+
+    def _preferred_mcp_tool(self, suffix: str) -> str | None:
+        """Pick the most likely MCP tool wrapper for a logical tool name."""
+        candidates = self._mcp_tool_candidates(suffix)
+        if not candidates:
+            return None
+        for name in candidates:
+            if name.startswith("mcp_memorix_"):
+                return name
+        return candidates[0]
+
+    def _has_memorix_tools(self) -> bool:
+        """Return whether a Memorix MCP server is currently available."""
+        for suffix in (
+            "memorix_session_start",
+            "memorix_search",
+            "memorix_detail",
+            "memorix_store",
+            "memorix_store_reasoning",
+        ):
+            if self._preferred_mcp_tool(suffix):
+                return True
+        return False
+
+    def _runtime_skill_names(self) -> list[str]:
+        """Return runtime-activated skills inferred from connected tools."""
+        skill_names: list[str] = []
+        if self._has_memorix_tools():
+            skill_names.append("memorix")
+        return skill_names
+
+    @staticmethod
+    def _tool_result_to_text(result: Any) -> str:
+        """Collapse a tool result into plain text for prompt injection."""
+        if result is None:
+            return ""
+        if isinstance(result, str):
+            return result
+        if isinstance(result, list):
+            parts: list[str] = []
+            for block in result:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+                else:
+                    parts.append(str(block))
+            return "\n".join(part for part in parts if part)
+        return str(result)
+
+    @staticmethod
+    def _is_usable_memorix_context(text: str) -> bool:
+        """Filter placeholder MCP outputs that should not enter the prompt."""
+        stripped = text.strip()
+        if not stripped or stripped == "(no output)":
+            return False
+        if stripped.startswith("Error"):
+            return False
+        if stripped.startswith("(MCP tool call"):
+            return False
+        return True
+
+    def _truncate_memorix_context(self, text: str) -> str:
+        """Keep injected Memorix startup context bounded."""
+        stripped = text.strip()
+        if len(stripped) <= self._MEMORIX_CONTEXT_MAX_CHARS:
+            return stripped
+        return self._truncate_prompt_text(stripped, self._MEMORIX_CONTEXT_MAX_CHARS)
+
+    async def _maybe_start_memorix_session(self, session: Session) -> str:
+        """Bind the current workspace to Memorix once per MCP connection and session."""
+        tool_name = self._preferred_mcp_tool("memorix_session_start")
+        if not self._mcp_connected or not tool_name:
+            return ""
+
+        project_root = str(self.workspace.expanduser().resolve(strict=False))
+        state_key = (self._mcp_connection_epoch, session.key, project_root, tool_name)
+        cached = self._memorix_session_context.get(state_key)
+        if cached is not None:
+            return cached
+        if state_key in self._memorix_started_sessions:
+            return ""
+
+        result = await self.tools.execute(
+            tool_name,
+            {
+                "agent": "nanobot",
+                "projectRoot": project_root,
+                "sessionId": session.key,
+            },
+        )
+        rendered = self._tool_result_to_text(result)
+        self._memorix_started_sessions.add(state_key)
+        if not self._is_usable_memorix_context(rendered):
+            if rendered.strip():
+                logger.warning("Memorix session start returned non-context output: {}", rendered[:200])
+            return ""
+
+        context = self._truncate_memorix_context(rendered)
+        self._memorix_session_context[state_key] = context
+        return context
+
+    @staticmethod
+    def _append_system_section(messages: list[dict[str, Any]], title: str, content: str) -> None:
+        """Append an extra section to the system prompt if present."""
+        if not content or not messages:
+            return
+        system = messages[0]
+        if system.get("role") != "system" or not isinstance(system.get("content"), str):
+            return
+        system["content"] += f"\n\n---\n\n# {title}\n\n{content}"
+
     async def _reset_mcp_connections(self) -> None:
         """Drop MCP tool registrations and close active MCP connections."""
         self._remove_registered_mcp_tools()
@@ -271,6 +465,8 @@ class AgentLoop:
             self._mcp_stack = None
         self._mcp_connected = False
         self._mcp_connecting = False
+        self._memorix_started_sessions.clear()
+        self._memorix_session_context.clear()
 
     def _apply_runtime_tool_config(self) -> None:
         """Apply runtime-configurable settings to already-registered tools."""
@@ -317,6 +513,10 @@ class AgentLoop:
         self.sessions.rebind_workspace(workspace)
         self.memory_consolidator.rebind_runtime(workspace=workspace, sessions=self.sessions)
 
+    def _configure_memory_router(self) -> None:
+        """Build the current memory router from runtime config."""
+        self.memory_router = MemoryRouter(user_backend=FileUserMemoryBackend())
+
     def _apply_runtime_config(self, config) -> bool:
         """Apply hot-reloadable config to the current agent instance."""
         from nanobot.providers.base import GenerationSettings
@@ -338,6 +538,7 @@ class AgentLoop:
         self.context_window_tokens = defaults.context_window_tokens
         self.exec_config = tools_cfg.exec
         self.image_gen_config = tools_cfg.image_gen
+        self.memory_config = config.memory
         self.restrict_to_workspace = tools_cfg.restrict_to_workspace
         self.brave_api_key = search_cfg.api_key or None
         self.web_proxy = web_cfg.proxy or None
@@ -367,6 +568,7 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=self.restrict_to_workspace,
         )
+        self._configure_memory_router()
         self._apply_runtime_tool_config()
 
         mcp_changed = self._dump_mcp_servers(config.tools.mcp_servers) != self._dump_mcp_servers(
@@ -591,6 +793,7 @@ class AgentLoop:
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
             self._mcp_connected = True
+            self._mcp_connection_epoch += 1
         except BaseException as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
@@ -1202,23 +1405,42 @@ class AgentLoop:
                 persona=persona,
             )
             history = session.get_history(max_messages=0)
+            memorix_context = await self._maybe_start_memorix_session(session)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            memory_scope = self._memory_scope(
+                session,
+                channel=channel,
+                chat_id=chat_id,
+                sender_id=msg.sender_id,
+                persona=persona,
+                language=language,
+            )
+            resolved_memory = self.memory_router.prepare_context(memory_scope)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content,
+                skill_names=self._runtime_skill_names(),
                 channel=channel,
                 chat_id=chat_id,
                 persona=persona,
                 language=language,
                 current_role=current_role,
+                memory_context=resolved_memory.block,
             )
+            self._append_system_section(messages, "Workspace Memory (Memorix)", memorix_context)
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
                 persona=persona,
             )
-            self._save_turn(session, all_msgs, 1 + len(history))
+            persisted_messages = self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
+            await self._commit_memory_turn(
+                scope=memory_scope,
+                inbound_content=msg.content,
+                outbound_content=final_content,
+                persisted_messages=persisted_messages,
+            )
             self._ensure_background_token_consolidation(session)
             return await self._maybe_attach_voice_reply(
                 OutboundMessage(
@@ -1257,14 +1479,31 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
+        memorix_context = await self._maybe_start_memorix_session(session)
+        memory_scope = self._memory_scope(
+            session,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            sender_id=msg.sender_id,
+            persona=persona,
+            language=language,
+        )
+        resolved_memory = self.memory_router.prepare_context(memory_scope)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
+            skill_names=self._runtime_skill_names(),
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
             persona=persona,
             language=language,
+            memory_context=resolved_memory.block,
+        )
+        self._append_system_section(
+            initial_messages,
+            "Workspace Memory (Memorix)",
+            memorix_context,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -1288,8 +1527,14 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        persisted_messages = self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
+        await self._commit_memory_turn(
+            scope=memory_scope,
+            inbound_content=msg.content,
+            outbound_content=final_content,
+            persisted_messages=persisted_messages,
+        )
         self._ensure_background_token_consolidation(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
@@ -1485,9 +1730,10 @@ class AgentLoop:
         )
         return prepared
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
+    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> list[dict[str, Any]]:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
+        persisted: list[dict[str, Any]] = []
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
@@ -1516,7 +1762,9 @@ class AgentLoop:
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
+            persisted.append(entry)
         session.updated_at = datetime.now()
+        return persisted
 
     async def process_direct(
         self,

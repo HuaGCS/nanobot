@@ -23,6 +23,7 @@ The skill format and metadata structure follow OpenClaw's conventions to maintai
 | `translate` | Faithfully translate full files, documents, or text without summarizing |
 | `living-together` | Turn shared-life moments into persona-aware image generation flows |
 | `emotional-companion` | Provide empathetic follow-up and heartbeat-style care prompts |
+| `memorix` | Use Memorix MCP tools for workspace memory, project history, and engineering rationale |
 | `tmux` | Remote-control tmux sessions |
 | `clawhub` | Search and install skills from ClawHub registry |
 | `skill-creator` | Create new skills |

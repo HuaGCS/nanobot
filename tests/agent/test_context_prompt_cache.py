@@ -112,3 +112,14 @@ def test_persona_prompt_uses_persona_overrides_and_memory(tmp_path: Path) -> Non
     assert "coder lore" in prompt
     assert "coder memory" in prompt
     assert "root memory" not in prompt
+
+
+def test_system_prompt_loads_explicit_runtime_skills(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt(skill_names=["memorix"])
+
+    assert "# Active Skills" in prompt
+    assert "### Skill: memorix" in prompt
+    assert "Use Memorix as workspace memory for engineering work." in prompt

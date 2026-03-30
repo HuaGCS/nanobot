@@ -65,6 +65,14 @@ class PersonaCommandHandler:
         try:
             if not await self.loop.memory_consolidator.archive_unconsolidated(session):
                 return self._response(msg, text(language, "memory_archival_failed_persona"))
+            await self.loop._flush_memory_session(
+                session,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                sender_id=msg.sender_id,
+                persona=current,
+                language=language,
+            )
         except Exception:
             logger.exception("/persona archival failed for {}", session.key)
             return self._response(msg, text(language, "memory_archival_failed_persona"))

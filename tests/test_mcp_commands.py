@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import InboundMessage
 
 
@@ -30,6 +31,36 @@ class _FakeTool:
 
     async def execute(self, **kwargs) -> str:
         return ""
+
+
+class _RecordingTool(Tool):
+    def __init__(
+        self,
+        name: str,
+        *,
+        result: str = "",
+        parameters: dict | None = None,
+    ) -> None:
+        self._name = name
+        self._result = result
+        self.calls: list[dict] = []
+        self._parameters = parameters or {"type": "object", "properties": {}}
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return self._name
+
+    @property
+    def parameters(self) -> dict:
+        return self._parameters
+
+    async def execute(self, **kwargs) -> str:
+        self.calls.append(kwargs)
+        return self._result
 
 
 def _make_loop(workspace: Path, *, mcp_servers: dict | None = None, config_path: Path | None = None):
@@ -195,6 +226,8 @@ async def test_regular_messages_pick_up_reloaded_mcp_config(tmp_path: Path, monk
             finish_reason="stop",
             reasoning_content=None,
             thinking_blocks=None,
+            tool_calls=[],
+            usage=None,
         )
     )
 
@@ -225,6 +258,75 @@ async def test_regular_messages_pick_up_reloaded_mcp_config(tmp_path: Path, monk
     assert response.content == "ok"
     assert list(loop._mcp_servers) == ["docs"]
     connect_mcp_servers.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_memorix_session_start_binds_workspace_and_activates_skill(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path, mcp_servers={"memorix": object()})
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=SimpleNamespace(
+            has_tool_calls=False,
+            content="ok",
+            finish_reason="stop",
+            reasoning_content=None,
+            thinking_blocks=None,
+            tool_calls=[],
+            usage=None,
+        )
+    )
+
+    session_start = _RecordingTool(
+        "mcp_memorix_memorix_session_start",
+        result="Relevant memorix project context",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent": {"type": "string"},
+                "projectRoot": {"type": "string"},
+                "sessionId": {"type": "string"},
+            },
+            "required": ["projectRoot"],
+        },
+    )
+    search = _RecordingTool("mcp_memorix_memorix_search")
+    loop.tools.register(session_start)
+    loop.tools.register(search)
+    loop._mcp_connected = True
+    loop._mcp_connection_epoch = 1
+
+    with patch.object(loop, "_connect_mcp", AsyncMock()):
+        response = await loop._process_message(
+            InboundMessage(
+                channel="cli",
+                sender_id="user",
+                chat_id="direct",
+                content="what happened in this codebase before?",
+            )
+        )
+        second = await loop._process_message(
+            InboundMessage(
+                channel="cli",
+                sender_id="user",
+                chat_id="direct",
+                content="and what should I watch out for now?",
+            )
+        )
+
+    assert response is not None
+    assert response.content == "ok"
+    assert second is not None
+    assert second.content == "ok"
+    assert session_start.calls == [
+        {
+            "agent": "nanobot",
+            "projectRoot": str(tmp_path.resolve()),
+            "sessionId": "cli:direct",
+        }
+    ]
+
+    prompt_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+    assert "Relevant memorix project context" in prompt_messages[0]["content"]
+    assert "### Skill: memorix" in prompt_messages[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -320,6 +422,7 @@ async def test_runtime_config_reload_updates_agent_and_tool_settings(tmp_path: P
     assert loop.channels_config.send_progress is False
     assert loop.channels_config.send_tool_hints is True
     loop.subagents.apply_runtime_config.assert_called_once_with(
+        workspace=tmp_path / "workspace",
         model="reloaded-model",
         brave_api_key="demo-key",
         web_proxy="http://127.0.0.1:7890",
@@ -338,4 +441,4 @@ async def test_runtime_config_reload_updates_agent_and_tool_settings(tmp_path: P
     assert web_search_tool.max_results == 7
     assert web_search_tool.proxy == "http://127.0.0.1:7890"
     assert web_fetch_tool.proxy == "http://127.0.0.1:7890"
-    assert read_tool._allowed_dir == tmp_path
+    assert read_tool._allowed_dir == tmp_path / "workspace"

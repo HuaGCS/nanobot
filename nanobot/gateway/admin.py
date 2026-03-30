@@ -42,6 +42,10 @@ _DEFAULT_ADMIN_LANG = "zh"
 _ADMIN_CONFIG_PATH_KEY = web.AppKey("admin_config_path", Path)
 _ADMIN_WORKSPACE_KEY = web.AppKey("admin_workspace_path", Path)
 _ADMIN_RELOAD_RUNTIME_KEY = web.AppKey("admin_reload_runtime", object)
+_MEMORIX_MCP_SERVER_NAME = "memorix"
+_MEMORIX_MCP_DEFAULT_COMMAND = "memorix"
+_MEMORIX_MCP_DEFAULT_ARGS = ("serve",)
+_MEMORIX_MCP_DEFAULT_TIMEOUT = 60
 
 
 @dataclass(frozen=True)
@@ -265,6 +269,192 @@ _CONFIG_FIELDS = (
         "text",
         "admin_config_image_reference_image_label",
         placeholder="__default__",
+    ),
+    ConfigFieldSpec(
+        "memory_user_shadow_write_mem0",
+        ("memory", "user", "shadowWriteMem0"),
+        "bool",
+        "admin_config_mem0_shadow_write_label",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_mode",
+        ("memory", "user", "mem0", "mode"),
+        "select",
+        "admin_config_mem0_mode_label",
+        options=("embedded",),
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_llm_provider",
+        ("memory", "user", "mem0", "llm", "provider"),
+        "text",
+        "admin_config_mem0_llm_provider_label",
+        placeholder="openai",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_llm_api_key",
+        ("memory", "user", "mem0", "llm", "apiKey"),
+        "text",
+        "admin_config_mem0_llm_api_key_label",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_llm_url",
+        ("memory", "user", "mem0", "llm", "url"),
+        "text",
+        "admin_config_mem0_llm_url_label",
+        placeholder="https://api.mem0.ai/v1",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_llm_model",
+        ("memory", "user", "mem0", "llm", "model"),
+        "text",
+        "admin_config_mem0_llm_model_label",
+        placeholder="gpt-4.1-mini",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_llm_headers",
+        ("memory", "user", "mem0", "llm", "headers"),
+        "json",
+        "admin_config_mem0_llm_headers_label",
+        rows=5,
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_llm_config",
+        ("memory", "user", "mem0", "llm", "config"),
+        "json",
+        "admin_config_mem0_llm_config_label",
+        rows=6,
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_embedder_provider",
+        ("memory", "user", "mem0", "embedder", "provider"),
+        "text",
+        "admin_config_mem0_embedder_provider_label",
+        placeholder="openai",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_embedder_api_key",
+        ("memory", "user", "mem0", "embedder", "apiKey"),
+        "text",
+        "admin_config_mem0_embedder_api_key_label",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_embedder_url",
+        ("memory", "user", "mem0", "embedder", "url"),
+        "text",
+        "admin_config_mem0_embedder_url_label",
+        placeholder="https://api.mem0.ai/v1",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_embedder_model",
+        ("memory", "user", "mem0", "embedder", "model"),
+        "text",
+        "admin_config_mem0_embedder_model_label",
+        placeholder="text-embedding-3-small",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_embedder_headers",
+        ("memory", "user", "mem0", "embedder", "headers"),
+        "json",
+        "admin_config_mem0_embedder_headers_label",
+        rows=5,
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_embedder_config",
+        ("memory", "user", "mem0", "embedder", "config"),
+        "json",
+        "admin_config_mem0_embedder_config_label",
+        rows=6,
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_vector_store_provider",
+        ("memory", "user", "mem0", "vectorStore", "provider"),
+        "text",
+        "admin_config_mem0_vector_store_provider_label",
+        placeholder="qdrant",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_vector_store_api_key",
+        ("memory", "user", "mem0", "vectorStore", "apiKey"),
+        "text",
+        "admin_config_mem0_vector_store_api_key_label",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_vector_store_url",
+        ("memory", "user", "mem0", "vectorStore", "url"),
+        "text",
+        "admin_config_mem0_vector_store_url_label",
+        placeholder="https://qdrant.example.com",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_vector_store_model",
+        ("memory", "user", "mem0", "vectorStore", "model"),
+        "text",
+        "admin_config_mem0_vector_store_model_label",
+        placeholder="",
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_vector_store_headers",
+        ("memory", "user", "mem0", "vectorStore", "headers"),
+        "json",
+        "admin_config_mem0_vector_store_headers_label",
+        rows=5,
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_vector_store_config",
+        ("memory", "user", "mem0", "vectorStore", "config"),
+        "json",
+        "admin_config_mem0_vector_store_config_label",
+        rows=6,
+    ),
+    ConfigFieldSpec(
+        "memory_user_mem0_metadata",
+        ("memory", "user", "mem0", "metadata"),
+        "json",
+        "admin_config_mem0_metadata_label",
+        rows=6,
+    ),
+    ConfigFieldSpec(
+        "tools_mcp_memorix_enabled",
+        (),
+        "bool",
+        "admin_config_memorix_enabled_label",
+    ),
+    ConfigFieldSpec(
+        "tools_mcp_memorix_type",
+        ("tools", "mcpServers", "memorix", "type"),
+        "select",
+        "admin_config_memorix_type_label",
+        options=("", "stdio", "streamableHttp", "sse"),
+    ),
+    ConfigFieldSpec(
+        "tools_mcp_memorix_command",
+        ("tools", "mcpServers", "memorix", "command"),
+        "text",
+        "admin_config_memorix_command_label",
+        "admin_config_memorix_command_hint",
+        placeholder="memorix",
+    ),
+    ConfigFieldSpec(
+        "tools_mcp_memorix_args",
+        ("tools", "mcpServers", "memorix", "args"),
+        "csv",
+        "admin_config_memorix_args_label",
+        "admin_config_memorix_args_hint",
+        placeholder="serve",
+    ),
+    ConfigFieldSpec(
+        "tools_mcp_memorix_url",
+        ("tools", "mcpServers", "memorix", "url"),
+        "text",
+        "admin_config_memorix_url_label",
+        "admin_config_memorix_url_hint",
+        placeholder="http://127.0.0.1:3211/mcp",
+    ),
+    ConfigFieldSpec(
+        "tools_mcp_memorix_tool_timeout",
+        ("tools", "mcpServers", "memorix", "toolTimeout"),
+        "int",
+        "admin_config_memorix_tool_timeout_label",
     ),
     ConfigFieldSpec(
         "channels_send_progress",
@@ -501,7 +691,16 @@ _COMMAND_DOCS = (
 _BLANK_AS_NONE_FIELDS = {
     "tools_web_proxy",
     "tools_image_gen_proxy",
+    "tools_mcp_memorix_type",
     "channels_voice_reply_speed",
+}
+_MEMORIX_CONFIG_FIELD_NAMES = {
+    "tools_mcp_memorix_enabled",
+    "tools_mcp_memorix_type",
+    "tools_mcp_memorix_command",
+    "tools_mcp_memorix_args",
+    "tools_mcp_memorix_url",
+    "tools_mcp_memorix_tool_timeout",
 }
 _CONFIG_SECTIONS = (
     (
@@ -555,6 +754,45 @@ _CONFIG_SECTIONS = (
             "tools_image_gen_proxy",
             "tools_image_gen_timeout",
             "tools_image_gen_reference_image",
+        ),
+    ),
+    (
+        "admin_config_section_mem0_title",
+        "admin_config_section_mem0_desc",
+        (
+            "memory_user_shadow_write_mem0",
+            "memory_user_mem0_mode",
+            "memory_user_mem0_llm_provider",
+            "memory_user_mem0_llm_api_key",
+            "memory_user_mem0_llm_url",
+            "memory_user_mem0_llm_model",
+            "memory_user_mem0_llm_headers",
+            "memory_user_mem0_llm_config",
+            "memory_user_mem0_embedder_provider",
+            "memory_user_mem0_embedder_api_key",
+            "memory_user_mem0_embedder_url",
+            "memory_user_mem0_embedder_model",
+            "memory_user_mem0_embedder_headers",
+            "memory_user_mem0_embedder_config",
+            "memory_user_mem0_vector_store_provider",
+            "memory_user_mem0_vector_store_api_key",
+            "memory_user_mem0_vector_store_url",
+            "memory_user_mem0_vector_store_model",
+            "memory_user_mem0_vector_store_headers",
+            "memory_user_mem0_vector_store_config",
+            "memory_user_mem0_metadata",
+        ),
+    ),
+    (
+        "admin_config_section_memorix_title",
+        "admin_config_section_memorix_desc",
+        (
+            "tools_mcp_memorix_enabled",
+            "tools_mcp_memorix_type",
+            "tools_mcp_memorix_command",
+            "tools_mcp_memorix_args",
+            "tools_mcp_memorix_url",
+            "tools_mcp_memorix_tool_timeout",
         ),
     ),
     (
@@ -1685,6 +1923,12 @@ def _set_nested_value(data: dict[str, Any], path: tuple[str, ...], value: Any) -
 
 def _config_form_values(config: Config) -> dict[str, Any]:
     voice = config.channels.voice_reply
+    memorix = config.tools.mcp_servers.get(_MEMORIX_MCP_SERVER_NAME)
+    memorix_args = (
+        list(memorix.args)
+        if memorix and memorix.args
+        else list(_MEMORIX_MCP_DEFAULT_ARGS)
+    )
     return {
         "agents_defaults_workspace": config.agents.defaults.workspace,
         "agents_defaults_model": config.agents.defaults.model,
@@ -1715,6 +1959,41 @@ def _config_form_values(config: Config) -> dict[str, Any]:
         "tools_image_gen_proxy": config.tools.image_gen.proxy or "",
         "tools_image_gen_timeout": str(config.tools.image_gen.timeout),
         "tools_image_gen_reference_image": config.tools.image_gen.reference_image,
+        "memory_user_shadow_write_mem0": config.memory.user.shadow_write_mem0,
+        "memory_user_mem0_mode": config.memory.user.mem0.mode,
+        "memory_user_mem0_llm_provider": config.memory.user.mem0.llm.provider,
+        "memory_user_mem0_llm_api_key": config.memory.user.mem0.llm.api_key,
+        "memory_user_mem0_llm_url": config.memory.user.mem0.llm.url,
+        "memory_user_mem0_llm_model": config.memory.user.mem0.llm.model,
+        "memory_user_mem0_llm_headers": _pretty_json(config.memory.user.mem0.llm.headers),
+        "memory_user_mem0_llm_config": _pretty_json(config.memory.user.mem0.llm.config),
+        "memory_user_mem0_embedder_provider": config.memory.user.mem0.embedder.provider,
+        "memory_user_mem0_embedder_api_key": config.memory.user.mem0.embedder.api_key,
+        "memory_user_mem0_embedder_url": config.memory.user.mem0.embedder.url,
+        "memory_user_mem0_embedder_model": config.memory.user.mem0.embedder.model,
+        "memory_user_mem0_embedder_headers": _pretty_json(config.memory.user.mem0.embedder.headers),
+        "memory_user_mem0_embedder_config": _pretty_json(config.memory.user.mem0.embedder.config),
+        "memory_user_mem0_vector_store_provider": config.memory.user.mem0.vector_store.provider,
+        "memory_user_mem0_vector_store_api_key": config.memory.user.mem0.vector_store.api_key,
+        "memory_user_mem0_vector_store_url": config.memory.user.mem0.vector_store.url,
+        "memory_user_mem0_vector_store_model": config.memory.user.mem0.vector_store.model,
+        "memory_user_mem0_vector_store_headers": _pretty_json(
+            config.memory.user.mem0.vector_store.headers
+        ),
+        "memory_user_mem0_vector_store_config": _pretty_json(
+            config.memory.user.mem0.vector_store.config
+        ),
+        "memory_user_mem0_metadata": _pretty_json(config.memory.user.mem0.metadata),
+        "tools_mcp_memorix_enabled": memorix is not None,
+        "tools_mcp_memorix_type": memorix.type if memorix and memorix.type else "",
+        "tools_mcp_memorix_command": (
+            memorix.command if memorix and memorix.command else _MEMORIX_MCP_DEFAULT_COMMAND
+        ),
+        "tools_mcp_memorix_args": ", ".join(memorix_args),
+        "tools_mcp_memorix_url": memorix.url if memorix else "",
+        "tools_mcp_memorix_tool_timeout": str(
+            memorix.tool_timeout if memorix else _MEMORIX_MCP_DEFAULT_TIMEOUT
+        ),
         "channels_send_progress": config.channels.send_progress,
         "channels_send_tool_hints": config.channels.send_tool_hints,
         "channels_send_max_retries": str(config.channels.send_max_retries),
@@ -1770,6 +2049,17 @@ def _parse_visual_value(request: web.Request, field: ConfigFieldSpec, raw_value:
     text_value = str(raw_value)
     stripped = text_value.strip()
 
+    if field.kind == "json":
+        if not stripped:
+            return {}
+        try:
+            data = json.loads(text_value)
+        except ValueError as exc:
+            raise ValueError(_t(request, "admin_error_invalid_json", error=exc)) from exc
+        if not isinstance(data, dict):
+            raise ValueError(_t(request, "admin_json_object_required"))
+        return data
+
     if field.kind == "int":
         if not stripped:
             raise ValueError(
@@ -1811,7 +2101,53 @@ def _apply_visual_config_values(
     visual_values: dict[str, Any],
 ) -> dict[str, Any]:
     updated = json.loads(json.dumps(raw_data))
+    memorix_enabled = bool(visual_values["tools_mcp_memorix_enabled"])
+    tools_node = updated.setdefault("tools", {})
+    if not isinstance(tools_node, dict):
+        tools_node = {}
+        updated["tools"] = tools_node
+    servers_node = tools_node.get("mcpServers")
+    if not isinstance(servers_node, dict):
+        servers_node = {}
+        tools_node["mcpServers"] = servers_node
+
+    if memorix_enabled:
+        memorix_values = {
+            "type": _parse_visual_value(
+                request,
+                _CONFIG_FIELD_MAP["tools_mcp_memorix_type"],
+                visual_values["tools_mcp_memorix_type"],
+            ),
+            "command": _parse_visual_value(
+                request,
+                _CONFIG_FIELD_MAP["tools_mcp_memorix_command"],
+                visual_values["tools_mcp_memorix_command"],
+            ),
+            "args": _parse_visual_value(
+                request,
+                _CONFIG_FIELD_MAP["tools_mcp_memorix_args"],
+                visual_values["tools_mcp_memorix_args"],
+            ),
+            "url": _parse_visual_value(
+                request,
+                _CONFIG_FIELD_MAP["tools_mcp_memorix_url"],
+                visual_values["tools_mcp_memorix_url"],
+            ),
+            "toolTimeout": _parse_visual_value(
+                request,
+                _CONFIG_FIELD_MAP["tools_mcp_memorix_tool_timeout"],
+                visual_values["tools_mcp_memorix_tool_timeout"],
+            ),
+        }
+        servers_node[_MEMORIX_MCP_SERVER_NAME] = memorix_values
+    else:
+        servers_node.pop(_MEMORIX_MCP_SERVER_NAME, None)
+        if not servers_node:
+            tools_node.pop("mcpServers", None)
+
     for field in _CONFIG_FIELDS:
+        if field.name in _MEMORIX_CONFIG_FIELD_NAMES:
+            continue
         value = _parse_visual_value(request, field, visual_values[field.name])
         _set_nested_value(updated, field.path, value)
     return updated
@@ -1867,7 +2203,7 @@ def _render_config_field(request: web.Request, field: ConfigFieldSpec, value: An
             f"{label_row}</label>{hint}</div>"
         )
 
-    if field.kind == "textarea":
+    if field.kind in {"textarea", "json"}:
         rows = max(field.rows, 3)
         css_class = "field full"
         return (

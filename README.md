@@ -1578,6 +1578,92 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.workspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
 During long tool-using turns, nanobot now compacts older tool results on demand so the system prompt, long-term memory, and recent working context stay inside the active context window.
 
+### Memorix via MCP
+
+[Memorix](https://github.com/AVIDS2/memorix) fits nanobot as workspace memory, not as the
+user-profile memory backend. Connect it through `tools.mcpServers` and keep the existing
+`memory/MEMORY.md` user memory path unchanged.
+
+Stdio example:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "memorix": {
+        "command": "memorix",
+        "args": ["serve"],
+        "toolTimeout": 60
+      }
+    }
+  }
+}
+```
+
+HTTP example:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "memorix": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:3211/mcp",
+        "toolTimeout": 60
+      }
+    }
+  }
+}
+```
+
+When Memorix tools are present, nanobot automatically:
+
+- loads the built-in `memorix` skill into the system prompt
+- calls `memorix_session_start` once per runtime MCP connection and chat session
+- binds `projectRoot` to the active nanobot workspace path
+
+That means code/history questions can use Memorix without replacing nanobot's current file-based
+long-term user memory. For local setup, follow the official Memorix install/init flow and prefer a
+real `memorix` binary or background server instead of `npx`. The built-in admin UI also exposes a
+dedicated visual `Memorix MCP` section for `tools.mcpServers.memorix`; other MCP servers still use
+the raw JSON editor.
+
+The reserved `memory.user.mem0` config block is currently stored for future integration only; it does
+not enable any runtime Mem0 backend by itself. Its provider sections (`llm`, `embedder`,
+`vectorStore`) now prefer explicit `provider`, `apiKey`, `url`, `model`, and `headers` fields, with
+`config` kept as an escape hatch for provider-specific extras such as collection names. The built-in
+admin UI now exposes a dedicated visual section for the common reserved Mem0 fields as well,
+including JSON textareas for `headers`, `config`, and top-level `metadata`, but it still does not
+turn Mem0 on at runtime by itself.
+
+```json
+{
+  "memory": {
+    "user": {
+      "shadowWriteMem0": false,
+      "mem0": {
+        "embedder": {
+          "provider": "openai",
+          "apiKey": "embed-key",
+          "url": "https://embed.example.com/v1",
+          "model": "text-embedding-3-small"
+        },
+        "vectorStore": {
+          "provider": "qdrant",
+          "url": "https://qdrant.example.com",
+          "headers": {
+            "api-key": "qdrant-key"
+          },
+          "config": {
+            "collectionName": "nanobot_user_memory"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
 
 
 

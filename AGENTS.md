@@ -24,7 +24,7 @@ Recent history favors short Conventional Commit subjects such as `fix(memory): .
 
 ## Security & Configuration Tips
 Do not commit real API keys, tokens, chat logs, or workspace data. Keep local secrets in `~/.nanobot/config.json` and use sanitized examples in docs and tests. If you change authentication, network access, or other safety-sensitive behavior, update `README.md` or `SECURITY.md` in the same PR.
-- If a change affects user-visible behavior, commands, workflows, or contributor conventions, update both `README.md` and `AGENTS.md` in the same patch so runtime docs and repo rules stay aligned.
+- If a change affects user-visible behavior, commands, workflows, or contributor conventions, update both `README.md`, `README_ZH.md` and `AGENTS.md` in the same patch so runtime docs and repo rules stay aligned.
 - `gateway.admin` controls the built-in per-instance admin page. Keep it disabled by default unless explicitly configured, require a non-empty `authKey` when enabled, and treat `/admin` as unreachable when the switch is off.
 - The built-in admin page edits the active instance config plus the started process's runtime workspace/persona files. Do not silently retarget it to some other workspace outside the current instance context.
 - The built-in admin page should also expose a slash-command reference page for the currently supported chat commands, including aliases and concrete usage examples.
@@ -33,6 +33,7 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - Admin UI strings must come from `nanobot/locales/en.json` and `nanobot/locales/zh.json`, not hardcoded dictionaries in `nanobot/gateway/admin.py`. Keep Chinese as the default admin locale, allow English switching, and preserve the visual config editor plus raw JSON fallback.
 - Visual admin config fields should include locale-backed hover descriptions for every exposed option, so operators can inspect field semantics without leaving the page.
 - Admin config saves should force-reload hot-reloadable runtime settings for the current instance where supported, and every visual field should be marked directly in the UI as either hot-reloadable or restart-required.
+- The admin visual config should expose a dedicated Memorix MCP section for `tools.mcpServers.memorix` with locale-backed labels/tooltips and hot-reload badges; leave generic multi-server MCP editing in the raw JSON fallback.
 
 ## Chat Commands & Skills
 - Slash commands are handled in `nanobot/agent/loop.py`; keep parsing logic there instead of scattering command behavior across channels.
@@ -43,6 +44,8 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - `/status` should return plain-text runtime info for the active session and stay wired into `/help` plus Telegram's command menu/localization coverage.
 - Agent runtime config should be hot-reloaded from the active `config.json` for safe in-process fields such as `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.workspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
 - Long tool-heavy turns should compact older tool outputs on demand before the next model call so system prompt memory and recent working context are less likely to fall out of the active context window.
+- Reserved `memory.user.mem0` config is schema-only for now and must not enable a runtime backend by itself. Prefer explicit `provider`, `apiKey`, `url`, `model`, and `headers` fields in `llm`, `embedder`, and `vectorStore`, and use `config` only for provider-specific extras.
+- The admin visual config may expose reserved Mem0 fields for `memory.user.mem0`, including common `provider`/`apiKey`/`url`/`model` inputs and JSON textareas for `headers`/`config`/`metadata`, but it must keep the same contract: configuration-only, no implicit runtime enablement.
 - nanobot does not expose local files over HTTP. If a feature needs a public URL for local files, provide your own static file server and point config such as `mediaBaseUrl` at it.
 - Generated screenshots, downloads, and other temporary user-delivery artifacts should be written under `workspace/out`, not the workspace root. Treat that as the generic delivery-artifact root for tools, MCP servers, and skills.
 - QQ outbound media can send remote rich-media URLs directly. For local QQ media under `workspace/out`, use direct `file_data` upload only; do not rely on URL fallback for local files. Supported local QQ rich media are images, `.mp4` video, and `.silk` voice.
@@ -58,7 +61,8 @@ Do not commit real API keys, tokens, chat logs, or workspace data. Keep local se
 - Never hardcode `~/.nanobot/workspace` for skill installation or lookup. Use the active runtime workspace from config or `--workspace`.
 - The implicit default workspace is `<config-dir>/workspace`. If `agents.defaults.workspace` is empty, keep workspace resolution tied to the active config path instead of a separate global default.
 - Workspace skills in `<workspace>/skills/` take precedence over built-in skills with the same directory name.
-- Built-in skills now include `translate`, `living-together`, and `emotional-companion`. Keep them aligned with the existing skill loader and current built-in tool surface instead of importing NanoMate-only runtime assumptions.
+- Built-in skills now include `translate`, `living-together`, `emotional-companion`, and `memorix`. Keep them aligned with the existing skill loader and current built-in tool surface instead of importing NanoMate-only runtime assumptions.
+- When Memorix MCP tools are connected, auto-load the built-in `memorix` skill and call `memorix_session_start` with the active workspace as `projectRoot` once per runtime MCP connection and chat session. Keep Memorix scoped to workspace/code memory instead of user-profile memory.
 - `nanobot persona import-st-card <file>` imports a SillyTavern character card into `<workspace>/personas/<name>/` by generating `SOUL.md`, `USER.md`, `memory/`, and persona-local metadata under `.nanobot/`.
 - `nanobot persona import-st-preset <file> --persona <name>` imports a SillyTavern preset into an existing persona by generating `STYLE.md` plus `.nanobot/st_preset.json`.
 - `nanobot persona import-st-worldinfo <file> --persona <name>` imports SillyTavern world info into an existing persona by generating `LORE.md` plus `.nanobot/st_world_info.json`.

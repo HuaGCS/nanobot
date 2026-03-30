@@ -54,6 +54,7 @@ class ContextBuilder:
         skill_names: list[str] | None = None,
         persona: str | None = None,
         language: str | None = None,
+        memory_context: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         active_persona = self.resolve_persona(persona)
@@ -64,15 +65,23 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        memory = self._memory_store(active_persona).get_memory_context()
+        memory = (
+            self._memory_store(active_persona).get_memory_context()
+            if memory_context is None
+            else memory_context
+        )
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+        active_skill_names: list[str] = []
+        for name in [*self.skills.get_always_skills(), *(skill_names or [])]:
+            if name not in active_skill_names:
+                active_skill_names.append(name)
+
+        if active_skill_names:
+            active_content = self.skills.load_skills_for_context(active_skill_names)
+            if active_content:
+                parts.append(f"# Active Skills\n\n{active_content}")
 
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
@@ -193,6 +202,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         persona: str | None = None,
         language: str | None = None,
         current_role: str = "user",
+        memory_context: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone)
@@ -206,7 +216,15 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names, persona=persona, language=language)},
+            {
+                "role": "system",
+                "content": self.build_system_prompt(
+                    skill_names,
+                    persona=persona,
+                    language=language,
+                    memory_context=memory_context,
+                ),
+            },
             *history,
             {"role": current_role, "content": merged},
         ]

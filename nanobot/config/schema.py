@@ -620,6 +620,40 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class Mem0ProviderConfig(Base):
+    """Reserved provider section for future Mem0 component configuration."""
+
+    provider: str = ""
+    api_key: str = ""
+    url: str = ""
+    model: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class Mem0Config(Base):
+    """Reserved Mem0 OSS configuration shape for future backend integration."""
+
+    mode: Literal["embedded"] = "embedded"
+    llm: Mem0ProviderConfig = Field(default_factory=Mem0ProviderConfig)
+    embedder: Mem0ProviderConfig = Field(default_factory=Mem0ProviderConfig)
+    vector_store: Mem0ProviderConfig = Field(default_factory=Mem0ProviderConfig)
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class UserMemoryConfig(Base):
+    """User-scoped long-term memory settings."""
+
+    shadow_write_mem0: bool = False
+    mem0: Mem0Config = Field(default_factory=Mem0Config)
+
+
+class MemoryConfig(Base):
+    """Long-term memory configuration."""
+
+    user: UserMemoryConfig = Field(default_factory=UserMemoryConfig)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -628,6 +662,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     _config_path: Path | None = PrivateAttr(default=None)
 
     def bind_config_path(self, config_path: Path | None) -> "Config":

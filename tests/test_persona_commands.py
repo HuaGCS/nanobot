@@ -38,6 +38,7 @@ class TestPersonaCommands:
         _make_persona(tmp_path, "coder", "You are coder persona.")
         loop, _provider = _make_loop(tmp_path)
         loop.memory_consolidator.archive_unconsolidated = AsyncMock(return_value=True)
+        loop._flush_memory_session = AsyncMock()
 
         session = loop.sessions.get_or_create("cli:direct")
         session.add_message("user", "hello")
@@ -51,6 +52,7 @@ class TestPersonaCommands:
         assert response is not None
         assert response.content == "Switched persona to coder. New session started."
         loop.memory_consolidator.archive_unconsolidated.assert_awaited_once()
+        loop._flush_memory_session.assert_awaited_once()
 
         switched = loop.sessions.get_or_create("cli:direct")
         assert switched.metadata["persona"] == "coder"
@@ -109,6 +111,8 @@ class TestPersonaCommands:
                 finish_reason="stop",
                 reasoning_content=None,
                 thinking_blocks=None,
+                tool_calls=[],
+                usage=None,
             )
         )
 
