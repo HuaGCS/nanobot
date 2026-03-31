@@ -33,6 +33,7 @@
 - [配置说明](#配置说明)
 - [多实例](#多实例)
 - [CLI 参考](#cli-参考)
+- [OpenAI 兼容 API](#openai-兼容-api)
 - [周期任务](#周期任务)
 - [Docker](#docker)
 - [Linux 服务](#linux-服务)
@@ -1137,6 +1138,7 @@ nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 | `nanobot agent -m "..."` | 单轮消息 |
 | `nanobot agent -w <workspace>` | 指定工作区启动 |
 | `nanobot agent -w <workspace> -c <config>` | 指定工作区和配置启动 |
+| `nanobot serve` | 启动 OpenAI 兼容 API |
 | `nanobot gateway` | 启动网关 |
 | `nanobot status` | 查看状态 |
 | `nanobot channels login <channel>` | 交互式登录某个渠道 |
@@ -1208,6 +1210,80 @@ manifest 中可声明：
 | `/restart` | 重启进程 |
 | `/status` | 查看运行状态 |
 | `/help` | 查看帮助 |
+
+## OpenAI 兼容 API
+
+nanobot 可以暴露一个最小化的 OpenAI 兼容接口，方便本地集成：
+
+```bash
+pip install "nanobot-ai[api]"
+nanobot serve
+```
+
+默认绑定地址为 `127.0.0.1:8900`。
+
+### 行为约束
+
+- 固定会话：所有请求共享同一个 nanobot 会话 `api:default`
+- 单消息输入：每次请求必须只包含一条 `user` 消息
+- 固定模型：可以省略 `model`，或者传入 `/v1/models` 返回的同一个模型名
+- 不支持流式：`stream=true` 当前不支持
+
+### 接口
+
+- `GET /health`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+### curl 示例
+
+```bash
+curl http://127.0.0.1:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": "hi"
+      }
+    ]
+  }'
+```
+
+### Python（`requests`）
+
+```python
+import requests
+
+resp = requests.post(
+    "http://127.0.0.1:8900/v1/chat/completions",
+    json={
+        "messages": [
+            {"role": "user", "content": "hi"}
+        ]
+    },
+    timeout=120,
+)
+resp.raise_for_status()
+print(resp.json()["choices"][0]["message"]["content"])
+```
+
+### Python（`openai`）
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8900/v1",
+    api_key="dummy",
+)
+
+resp = client.chat.completions.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "hi"}],
+)
+print(resp.choices[0].message.content)
+```
 
 ## 周期任务
 

@@ -1372,7 +1372,7 @@ wheels = [
 
 [[package]]
 name = "nanobot-ai"
-version = "0.1.4.post5"
+version = "0.1.4.post6"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
@@ -1407,7 +1407,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+api = [
+    { name = "aiohttp" },
+]
 dev = [
+    { name = "aiohttp" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1428,6 +1432,8 @@ weixin = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", marker = "extra == 'api'", specifier = ">=3.9.0,<4.0.0" },
+    { name = "aiohttp", marker = "extra == 'dev'", specifier = ">=3.9.0,<4.0.0" },
     { name = "anthropic", specifier = ">=0.45.0,<1.0.0" },
     { name = "chardet", specifier = ">=3.0.2,<6.0.0" },
     { name = "croniter", specifier = ">=6.0.0,<7.0.0" },
@@ -1468,7 +1474,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=16.0,<17.0" },
     { name = "wecom-aibot-sdk-python", marker = "extra == 'wecom'", specifier = ">=0.1.5" },
 ]
-provides-extras = ["wecom", "weixin", "matrix", "dev"]
+provides-extras = ["api", "wecom", "weixin", "matrix", "dev"]
 
 [[package]]
 name = "nh3"

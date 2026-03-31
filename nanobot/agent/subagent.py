@@ -21,6 +21,21 @@ from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
 
 
+class _SubagentHook(AgentHook):
+    """Logging-only hook for subagent execution."""
+
+    def __init__(self, task_id: str) -> None:
+        self._task_id = task_id
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        for tool_call in context.tool_calls:
+            args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+            logger.debug(
+                "Subagent [{}] executing: {} with arguments: {}",
+                self._task_id, tool_call.name, args_str,
+            )
+
+
 class SubagentManager:
     """Manages background subagent execution."""
 
@@ -152,18 +167,12 @@ class SubagentManager:
                 {"role": "user", "content": task},
             ]
 
-            class _SubagentHook(AgentHook):
-                async def before_execute_tools(self, context: AgentHookContext) -> None:
-                    for tool_call in context.tool_calls:
-                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                        logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
-
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=messages,
                 tools=tools,
                 model=self.model,
                 max_iterations=15,
-                hook=_SubagentHook(),
+                hook=_SubagentHook(task_id),
                 max_iterations_message="Task completed but no final response was generated.",
                 error_message=None,
                 fail_on_tool_error=True,

@@ -23,7 +23,7 @@ from nanobot.agent.commands import (
     build_agent_command_router,
 )
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.i18n import (
     DEFAULT_LANGUAGE,
     resolve_language,
@@ -66,6 +66,121 @@ from nanobot.utils.helpers import ensure_dir, estimate_prompt_tokens_chain, safe
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ImageGenConfig, MemoryConfig
     from nanobot.cron.service import CronService
+
+
+class _LoopHook(AgentHook):
+    """Core lifecycle hook for the main agent loop.
+
+    Handles streaming delta relay, progress reporting, tool-call logging,
+    and think-tag stripping for the built-in agent path.
+    """
+
+    def __init__(
+        self,
+        agent_loop: AgentLoop,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+        on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        *,
+        channel: str = "cli",
+        chat_id: str = "direct",
+        message_id: str | None = None,
+    ) -> None:
+        self._loop = agent_loop
+        self._on_progress = on_progress
+        self._on_stream = on_stream
+        self._on_stream_end = on_stream_end
+        self._channel = channel
+        self._chat_id = chat_id
+        self._message_id = message_id
+        self._stream_buf = ""
+
+    def wants_streaming(self) -> bool:
+        return self._on_stream is not None
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        from nanobot.utils.helpers import strip_think
+
+        prev_clean = strip_think(self._stream_buf)
+        self._stream_buf += delta
+        new_clean = strip_think(self._stream_buf)
+        incremental = new_clean[len(prev_clean):]
+        if incremental and self._on_stream:
+            await self._on_stream(incremental)
+
+    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        if self._on_stream_end:
+            await self._on_stream_end(resuming=resuming)
+        self._stream_buf = ""
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        if self._on_progress:
+            if not self._on_stream:
+                thought = self._loop._strip_think(
+                    context.response.content if context.response else None
+                )
+                if thought:
+                    await self._on_progress(thought)
+            tool_hint = self._loop._strip_think(self._loop._tool_hint(context.tool_calls))
+            await self._on_progress(tool_hint, tool_hint=True)
+        for tc in context.tool_calls:
+            args_str = json.dumps(tc.arguments, ensure_ascii=False)
+            logger.info("Tool call: {}({})", tc.name, args_str[:200])
+        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
+
+    def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+        return self._loop._strip_think(content)
+
+
+class _LoopHookChain(AgentHook):
+    """Run the core loop hook first, then best-effort extra hooks.
+
+    This preserves the historical failure behavior of ``_LoopHook`` while still
+    letting user-supplied hooks opt into ``CompositeHook`` isolation.
+    """
+
+    __slots__ = ("_primary", "_extras")
+
+    def __init__(self, primary: AgentHook, extra_hooks: list[AgentHook]) -> None:
+        self._primary = primary
+        self._extras = CompositeHook(extra_hooks)
+
+    def wants_streaming(self) -> bool:
+        return self._primary.wants_streaming() or self._extras.wants_streaming()
+
+    def prepare_messages(
+        self,
+        context: AgentHookContext,
+        tool_definitions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return self._primary.prepare_messages(context, tool_definitions)
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        await self._primary.before_iteration(context)
+        await self._extras.before_iteration(context)
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        await self._primary.on_stream(context, delta)
+        await self._extras.on_stream(context, delta)
+
+    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        await self._primary.on_stream_end(context, resuming=resuming)
+        await self._extras.on_stream_end(context, resuming=resuming)
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        await self._primary.before_execute_tools(context)
+        await self._extras.before_execute_tools(context)
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        await self._primary.after_iteration(context)
+        await self._extras.after_iteration(context)
+
+    def normalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+        return self._primary.normalize_content(context, content)
+
+    def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+        content = self._primary.finalize_content(context, content)
+        return self._extras.finalize_content(context, content)
 
 
 class AgentLoop:
@@ -131,6 +246,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        hooks: list[AgentHook] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, ImageGenConfig, MemoryConfig
         self.bus = bus
@@ -153,6 +269,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
+        self._extra_hooks: list[AgentHook] = list(hooks or [])
         self._clawhub_lock = asyncio.Lock()
         self._clawhub_npm_cache_dir = self._CLAWHUB_NPM_CACHE_DIR / str(os.getpid())
         self._language_commands = LanguageCommandHandler(self)
@@ -1136,12 +1253,19 @@ class AgentLoop:
                 visible = loop_self._filter_persona_response(content, persona)
                 return visible or content
 
+        loop_hook = _LoopHook()
+        hook: AgentHook = (
+            _LoopHookChain(loop_hook, self._extra_hooks)
+            if self._extra_hooks
+            else loop_hook
+        )
+
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
             tools=self.tools,
             model=self.model,
             max_iterations=self.max_iterations,
-            hook=_LoopHook(),
+            hook=hook,
             error_message="Sorry, I encountered an error calling the AI model.",
             max_iterations_message=(
                 f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
