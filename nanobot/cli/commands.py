@@ -588,6 +588,7 @@ def serve(
         raise typer.Exit(1)
 
     from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
@@ -673,6 +674,7 @@ def gateway(
     from nanobot.gateway.http import GatewayHttpServer
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
+    from nanobot.star_office import StarOfficeHook, StarOfficePushSettings, StarOfficeStatusTracker
 
     if verbose:
         import logging
@@ -688,6 +690,9 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
+    star_office_tracker = StarOfficeStatusTracker(
+        push_settings=StarOfficePushSettings.from_status_config(config.gateway.status)
+    )
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -720,6 +725,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        hooks=[StarOfficeHook(star_office_tracker)],
     )
 
     # Set cron callback (needs agent)
@@ -775,6 +781,7 @@ def gateway(
         cron.rebind_store(reloaded.workspace_path / "cron" / "jobs.json")
         await agent.reload_runtime_config(reloaded)
         channels.apply_runtime_config(reloaded)
+        star_office_tracker.apply_push_settings(StarOfficePushSettings.from_status_config(reloaded.gateway.status))
         await heartbeat.apply_runtime_config(
             workspace=reloaded.workspace_path,
             model=agent.model,
@@ -790,6 +797,7 @@ def gateway(
         config_path=runtime_config_path,
         workspace=config.workspace_path,
         reload_runtime=_reload_runtime_state,
+        star_office_tracker=star_office_tracker,
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
@@ -868,6 +876,7 @@ def gateway(
             await cron.start()
             await heartbeat.start()
             await http_server.start()
+            star_office_tracker.publish_current()
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -881,6 +890,7 @@ def gateway(
             agent.stop()
             await http_server.stop()
             await channels.stop_all()
+            await star_office_tracker.aclose()
 
     asyncio.run(run())
 

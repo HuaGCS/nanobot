@@ -1057,8 +1057,11 @@ HTTP 示例：
 当前 admin 页面支持：
 
 - 可视化编辑并校验 `config.json`，同时保留高级 JSON 兜底编辑器
+- 可视化编辑 `gateway.status`，用于 Star-Office-UI 一类状态看板访问当前实例的 `GET /status`，也可直接配置 HTTP 主动推送
 - 可视化编辑 `agents.defaults.providerPool`，提供按行维护 targets 的列表式界面，支持新增 / 删除 / 排序，以及故障切换 / 轮询策略
 - 可视化编辑常用 `providers.*` 配置块，例如 `openrouter`、`openai`、`anthropic`、`deepseek`、`custom`、`ollama`、`vllm`，并按 provider 分组成可折叠卡片，收起时显示安全摘要
+- 可视化编辑常见单实例 channel 凭据块，例如 `whatsapp`、`telegram`、`discord`、`feishu`、`dingtalk`、`slack`、`qq`、`matrix`、`wecom`；若某个 channel 已使用 `instances` 多实例结构，这里会只读提示，仍需在高级 JSON 中维护
+- 可视化编辑 `tools.exec`，用于控制 shell 命令执行、超时时间和额外 PATH
 - 可视化编辑专门的 `Memorix MCP` 分区，对应 `tools.mcpServers.memorix`
 - 可视化编辑 `Mem0 预留配置` 分区，对应 `memory.user.mem0`
 - 独立的命令总览页，展示所有聊天 slash 命令、别名和用法
@@ -1071,6 +1074,51 @@ HTTP 示例：
 如果你在 admin 页面里改了 `agents.defaults.workspace`，当前 gateway 实例会在保存后立即切换到
 新的 runtime workspace。只有表单里明确标注“需重启”的字段，才需要重启当前进程才能生效。
 `agents.defaults.providerPool` 也属于需重启项，因为它会改变 provider 路由策略。
+
+### Star Office UI 状态接口
+
+nanobot 可以额外暴露一个很小的 HTTP 状态接口，方便接入
+[`Star-Office-UI`](https://github.com/ringhyacinth/Star-Office-UI) 这类看板。该接口默认关闭，
+由同一个 `nanobot gateway` 进程提供。
+
+```json
+{
+  "gateway": {
+    "status": {
+      "enabled": true,
+      "authKey": "optional-bearer-token",
+      "push": {
+        "enabled": true,
+        "officeUrl": "https://office.example.com",
+        "joinKey": "replace-with-your-join-key",
+        "agentName": "nanobot",
+        "timeout": 10
+      }
+    }
+  }
+}
+```
+
+行为规则：
+
+- 路径是当前 gateway 进程下的 `GET /status`
+- `gateway.status.enabled=false` 时，`/status` 返回 `404`
+- 如果 `gateway.status.authKey` 非空，请在请求头里带上 `Authorization: Bearer <authKey>`
+- 返回 JSON 会包含 `state`、`detail`、`updatedAt`、`activeRuns` 等稳定字段
+- nanobot 会根据 agent 生命周期自动刷新状态，当前会使用 `idle`、`researching`、`executing`、`syncing`、`writing`、`error` 这些状态值
+- `gateway.status.push.*` 还可以直接调用 Star-Office-UI 的 `join-agent` / `agent-push` HTTP 接口，把状态主动推送过去
+
+接 `Star-Office-UI` 时，把它本地轮询/推送脚本指向你的 gateway 即可，例如：
+
+```bash
+python office-agent-push.py --status-url http://127.0.0.1:18790/status
+```
+
+如果你配置了 `gateway.status.authKey`，记得在 Star Office 侧脚本或反向代理里同步附带对应
+Bearer Token。
+
+如果你不想轮询 `/status`，也可以直接开启 `gateway.status.push`。开启后，nanobot 会主动向
+配置好的 Star-Office-UI 地址注册自己，并在运行状态变化时直接通过 HTTP 推送更新。
 
 ### 时区
 

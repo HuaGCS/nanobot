@@ -11,6 +11,7 @@ from pydantic import (
     PrivateAttr,
     ValidationInfo,
     field_validator,
+    model_validator,
 )
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
@@ -631,6 +632,39 @@ class GatewayAdminConfig(Base):
     auth_key: str = ""
 
 
+class GatewayStatusPushConfig(Base):
+    """Optional Star Office UI push configuration."""
+
+    enabled: bool = False
+    office_url: str = ""
+    join_key: str = ""
+    agent_name: str = "nanobot"
+    timeout: float = Field(default=10.0, gt=0.0)
+
+    @field_validator("agent_name", mode="before")
+    @classmethod
+    def _default_agent_name(cls, value: Any) -> str:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return "nanobot"
+
+    @model_validator(mode="after")
+    def _validate_required_fields(self) -> "GatewayStatusPushConfig":
+        if self.enabled and not self.office_url.strip():
+            raise ValueError("gateway.status.push.officeUrl is required when push is enabled")
+        if self.enabled and not self.join_key.strip():
+            raise ValueError("gateway.status.push.joinKey is required when push is enabled")
+        return self
+
+
+class GatewayStatusConfig(Base):
+    """Optional HTTP status endpoint for Star Office UI-style dashboards."""
+
+    enabled: bool = False
+    auth_key: str = ""
+    push: GatewayStatusPushConfig = Field(default_factory=GatewayStatusPushConfig)
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
@@ -638,6 +672,7 @@ class GatewayConfig(Base):
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     admin: GatewayAdminConfig = Field(default_factory=GatewayAdminConfig)
+    status: GatewayStatusConfig = Field(default_factory=GatewayStatusConfig)
 
 
 class WebSearchConfig(Base):

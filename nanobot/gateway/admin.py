@@ -302,6 +302,276 @@ _CONFIG_FIELDS = (
         "admin_config_gateway_admin_auth_key_label",
     ),
     ConfigFieldSpec(
+        "gateway_status_enabled",
+        ("gateway", "status", "enabled"),
+        "bool",
+        "admin_config_gateway_status_enabled_label",
+    ),
+    ConfigFieldSpec(
+        "gateway_status_auth_key",
+        ("gateway", "status", "authKey"),
+        "text",
+        "admin_config_gateway_status_auth_key_label",
+        "admin_config_gateway_status_auth_key_hint",
+    ),
+    ConfigFieldSpec(
+        "gateway_status_push_enabled",
+        ("gateway", "status", "push", "enabled"),
+        "bool",
+        "admin_config_gateway_status_push_enabled_label",
+    ),
+    ConfigFieldSpec(
+        "gateway_status_push_office_url",
+        ("gateway", "status", "push", "officeUrl"),
+        "text",
+        "admin_config_gateway_status_push_office_url_label",
+        "admin_config_gateway_status_push_office_url_hint",
+        placeholder="https://office.example.com",
+    ),
+    ConfigFieldSpec(
+        "gateway_status_push_join_key",
+        ("gateway", "status", "push", "joinKey"),
+        "text",
+        "admin_config_gateway_status_push_join_key_label",
+    ),
+    ConfigFieldSpec(
+        "gateway_status_push_agent_name",
+        ("gateway", "status", "push", "agentName"),
+        "text",
+        "admin_config_gateway_status_push_agent_name_label",
+        placeholder="nanobot",
+    ),
+    ConfigFieldSpec(
+        "gateway_status_push_timeout",
+        ("gateway", "status", "push", "timeout"),
+        "float",
+        "admin_config_gateway_status_push_timeout_label",
+    ),
+    ConfigFieldSpec(
+        "channels_whatsapp_enabled",
+        ("channels", "whatsapp", "enabled"),
+        "bool",
+        "admin_config_channels_whatsapp_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_whatsapp_bridge_url",
+        ("channels", "whatsapp", "bridgeUrl"),
+        "text",
+        "admin_config_channels_whatsapp_bridge_url_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_whatsapp_bridge_token",
+        ("channels", "whatsapp", "bridgeToken"),
+        "text",
+        "admin_config_channels_whatsapp_bridge_token_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_telegram_enabled",
+        ("channels", "telegram", "enabled"),
+        "bool",
+        "admin_config_channels_telegram_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_telegram_token",
+        ("channels", "telegram", "token"),
+        "text",
+        "admin_config_channels_telegram_token_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_telegram_proxy",
+        ("channels", "telegram", "proxy"),
+        "text",
+        "admin_config_channels_telegram_proxy_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_discord_enabled",
+        ("channels", "discord", "enabled"),
+        "bool",
+        "admin_config_channels_discord_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_discord_token",
+        ("channels", "discord", "token"),
+        "text",
+        "admin_config_channels_discord_token_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_discord_gateway_url",
+        ("channels", "discord", "gatewayUrl"),
+        "text",
+        "admin_config_channels_discord_gateway_url_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_discord_intents",
+        ("channels", "discord", "intents"),
+        "int",
+        "admin_config_channels_discord_intents_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_feishu_enabled",
+        ("channels", "feishu", "enabled"),
+        "bool",
+        "admin_config_channels_feishu_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_feishu_app_id",
+        ("channels", "feishu", "appId"),
+        "text",
+        "admin_config_channels_feishu_app_id_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_feishu_app_secret",
+        ("channels", "feishu", "appSecret"),
+        "text",
+        "admin_config_channels_feishu_app_secret_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_feishu_encrypt_key",
+        ("channels", "feishu", "encryptKey"),
+        "text",
+        "admin_config_channels_feishu_encrypt_key_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_feishu_verification_token",
+        ("channels", "feishu", "verificationToken"),
+        "text",
+        "admin_config_channels_feishu_verification_token_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_dingtalk_enabled",
+        ("channels", "dingtalk", "enabled"),
+        "bool",
+        "admin_config_channels_dingtalk_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_dingtalk_client_id",
+        ("channels", "dingtalk", "clientId"),
+        "text",
+        "admin_config_channels_dingtalk_client_id_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_dingtalk_client_secret",
+        ("channels", "dingtalk", "clientSecret"),
+        "text",
+        "admin_config_channels_dingtalk_client_secret_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_slack_enabled",
+        ("channels", "slack", "enabled"),
+        "bool",
+        "admin_config_channels_slack_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_slack_bot_token",
+        ("channels", "slack", "botToken"),
+        "text",
+        "admin_config_channels_slack_bot_token_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_slack_app_token",
+        ("channels", "slack", "appToken"),
+        "text",
+        "admin_config_channels_slack_app_token_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_qq_enabled",
+        ("channels", "qq", "enabled"),
+        "bool",
+        "admin_config_channels_qq_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_qq_app_id",
+        ("channels", "qq", "appId"),
+        "text",
+        "admin_config_channels_qq_app_id_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_qq_secret",
+        ("channels", "qq", "secret"),
+        "text",
+        "admin_config_channels_qq_secret_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_matrix_enabled",
+        ("channels", "matrix", "enabled"),
+        "bool",
+        "admin_config_channels_matrix_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_matrix_homeserver",
+        ("channels", "matrix", "homeserver"),
+        "text",
+        "admin_config_channels_matrix_homeserver_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_matrix_access_token",
+        ("channels", "matrix", "accessToken"),
+        "text",
+        "admin_config_channels_matrix_access_token_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_matrix_user_id",
+        ("channels", "matrix", "userId"),
+        "text",
+        "admin_config_channels_matrix_user_id_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_matrix_device_id",
+        ("channels", "matrix", "deviceId"),
+        "text",
+        "admin_config_channels_matrix_device_id_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_wecom_enabled",
+        ("channels", "wecom", "enabled"),
+        "bool",
+        "admin_config_channels_wecom_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_wecom_bot_id",
+        ("channels", "wecom", "botId"),
+        "text",
+        "admin_config_channels_wecom_bot_id_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_wecom_secret",
+        ("channels", "wecom", "secret"),
+        "text",
+        "admin_config_channels_wecom_secret_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
         "tools_restrict_to_workspace",
         ("tools", "restrictToWorkspace"),
         "bool",
@@ -340,6 +610,26 @@ _CONFIG_FIELDS = (
         ("tools", "web", "search", "maxResults"),
         "int",
         "admin_config_web_search_max_results_label",
+    ),
+    ConfigFieldSpec(
+        "tools_exec_enable",
+        ("tools", "exec", "enable"),
+        "bool",
+        "admin_config_exec_enable_label",
+    ),
+    ConfigFieldSpec(
+        "tools_exec_timeout",
+        ("tools", "exec", "timeout"),
+        "int",
+        "admin_config_exec_timeout_label",
+    ),
+    ConfigFieldSpec(
+        "tools_exec_path_append",
+        ("tools", "exec", "pathAppend"),
+        "text",
+        "admin_config_exec_path_append_label",
+        "admin_config_exec_path_append_hint",
+        placeholder="/usr/local/bin:/usr/sbin",
     ),
     ConfigFieldSpec(
         "tools_image_gen_enabled",
@@ -809,6 +1099,7 @@ _BLANK_AS_NONE_FIELDS = {
     "tools_web_proxy",
     "tools_image_gen_proxy",
     "tools_mcp_memorix_type",
+    "channels_telegram_proxy",
     "channels_voice_reply_speed",
 }
 _MEMORIX_CONFIG_FIELD_NAMES = {
@@ -887,6 +1178,120 @@ _PROVIDER_CONFIG_GROUPS = (
         ),
     ),
 )
+_CHANNEL_CONFIG_GROUPS = (
+    (
+        "whatsapp",
+        "admin_channel_group_whatsapp_title",
+        "admin_channel_group_whatsapp_desc",
+        (
+            "channels_whatsapp_enabled",
+            "channels_whatsapp_bridge_url",
+            "channels_whatsapp_bridge_token",
+        ),
+    ),
+    (
+        "telegram",
+        "admin_channel_group_telegram_title",
+        "admin_channel_group_telegram_desc",
+        (
+            "channels_telegram_enabled",
+            "channels_telegram_token",
+            "channels_telegram_proxy",
+        ),
+    ),
+    (
+        "discord",
+        "admin_channel_group_discord_title",
+        "admin_channel_group_discord_desc",
+        (
+            "channels_discord_enabled",
+            "channels_discord_token",
+            "channels_discord_gateway_url",
+            "channels_discord_intents",
+        ),
+    ),
+    (
+        "feishu",
+        "admin_channel_group_feishu_title",
+        "admin_channel_group_feishu_desc",
+        (
+            "channels_feishu_enabled",
+            "channels_feishu_app_id",
+            "channels_feishu_app_secret",
+            "channels_feishu_encrypt_key",
+            "channels_feishu_verification_token",
+        ),
+    ),
+    (
+        "dingtalk",
+        "admin_channel_group_dingtalk_title",
+        "admin_channel_group_dingtalk_desc",
+        (
+            "channels_dingtalk_enabled",
+            "channels_dingtalk_client_id",
+            "channels_dingtalk_client_secret",
+        ),
+    ),
+    (
+        "slack",
+        "admin_channel_group_slack_title",
+        "admin_channel_group_slack_desc",
+        (
+            "channels_slack_enabled",
+            "channels_slack_bot_token",
+            "channels_slack_app_token",
+        ),
+    ),
+    (
+        "qq",
+        "admin_channel_group_qq_title",
+        "admin_channel_group_qq_desc",
+        (
+            "channels_qq_enabled",
+            "channels_qq_app_id",
+            "channels_qq_secret",
+        ),
+    ),
+    (
+        "matrix",
+        "admin_channel_group_matrix_title",
+        "admin_channel_group_matrix_desc",
+        (
+            "channels_matrix_enabled",
+            "channels_matrix_homeserver",
+            "channels_matrix_access_token",
+            "channels_matrix_user_id",
+            "channels_matrix_device_id",
+        ),
+    ),
+    (
+        "wecom",
+        "admin_channel_group_wecom_title",
+        "admin_channel_group_wecom_desc",
+        (
+            "channels_wecom_enabled",
+            "channels_wecom_bot_id",
+            "channels_wecom_secret",
+        ),
+    ),
+)
+_CHANNEL_CONFIG_SECTION_FIELDS = tuple(
+    field_name
+    for _, _, _, field_names in _CHANNEL_CONFIG_GROUPS
+    for field_name in field_names
+)
+_CHANNEL_CONFIG_FIELD_NAMES = set(_CHANNEL_CONFIG_SECTION_FIELDS)
+_CHANNEL_CONFIG_FIELD_TO_GROUP = {
+    field_name: group_key
+    for group_key, _, _, field_names in _CHANNEL_CONFIG_GROUPS
+    for field_name in field_names
+}
+_CHANNEL_GROUP_SUMMARY_URL_FIELDS = {
+    "channels_whatsapp_bridge_url",
+    "channels_telegram_proxy",
+    "channels_discord_gateway_url",
+    "channels_matrix_homeserver",
+}
 _CONFIG_SECTIONS = (
     (
         "admin_config_section_agents_title",
@@ -935,7 +1340,25 @@ _CONFIG_SECTIONS = (
             "gateway_heartbeat_keep_recent_messages",
             "gateway_admin_enabled",
             "gateway_admin_auth_key",
+            "gateway_status_enabled",
+            "gateway_status_auth_key",
         ),
+    ),
+    (
+        "admin_config_section_status_push_title",
+        "admin_config_section_status_push_desc",
+        (
+            "gateway_status_push_enabled",
+            "gateway_status_push_office_url",
+            "gateway_status_push_join_key",
+            "gateway_status_push_agent_name",
+            "gateway_status_push_timeout",
+        ),
+    ),
+    (
+        "admin_config_section_channels_title",
+        "admin_config_section_channels_desc",
+        _CHANNEL_CONFIG_SECTION_FIELDS,
     ),
     (
         "admin_config_section_web_title",
@@ -947,6 +1370,15 @@ _CONFIG_SECTIONS = (
             "tools_web_search_api_key",
             "tools_web_search_base_url",
             "tools_web_search_max_results",
+        ),
+    ),
+    (
+        "admin_config_section_exec_title",
+        "admin_config_section_exec_desc",
+        (
+            "tools_exec_enable",
+            "tools_exec_timeout",
+            "tools_exec_path_append",
         ),
     ),
     (
@@ -2263,6 +2695,101 @@ def _config_form_values(config: Config) -> dict[str, Any]:
         if memorix and memorix.args
         else list(_MEMORIX_MCP_DEFAULT_ARGS)
     )
+    channel_group_modes: dict[str, str] = {}
+    channel_group_enabled: dict[str, bool] = {}
+    channel_group_instances: dict[str, int] = {}
+    channel_values: dict[str, Any] = {}
+    for _, _, _, field_names in _CHANNEL_CONFIG_GROUPS:
+        for field_name in field_names:
+            field = _CONFIG_FIELD_MAP[field_name]
+            channel_values[field_name] = False if field.kind == "bool" else ""
+
+    for group_key, _, _, _ in _CHANNEL_CONFIG_GROUPS:
+        channel_config = getattr(config.channels, group_key)
+        is_multi = hasattr(channel_config, "instances")
+        channel_group_modes[group_key] = "multi" if is_multi else "single"
+        channel_group_enabled[group_key] = bool(getattr(channel_config, "enabled", False))
+        channel_group_instances[group_key] = len(getattr(channel_config, "instances", [])) if is_multi else 0
+        if is_multi:
+            continue
+        if group_key == "whatsapp":
+            channel_values.update(
+                {
+                    "channels_whatsapp_enabled": channel_config.enabled,
+                    "channels_whatsapp_bridge_url": channel_config.bridge_url,
+                    "channels_whatsapp_bridge_token": channel_config.bridge_token,
+                }
+            )
+        elif group_key == "telegram":
+            channel_values.update(
+                {
+                    "channels_telegram_enabled": channel_config.enabled,
+                    "channels_telegram_token": channel_config.token,
+                    "channels_telegram_proxy": channel_config.proxy or "",
+                }
+            )
+        elif group_key == "discord":
+            channel_values.update(
+                {
+                    "channels_discord_enabled": channel_config.enabled,
+                    "channels_discord_token": channel_config.token,
+                    "channels_discord_gateway_url": channel_config.gateway_url,
+                    "channels_discord_intents": str(channel_config.intents),
+                }
+            )
+        elif group_key == "feishu":
+            channel_values.update(
+                {
+                    "channels_feishu_enabled": channel_config.enabled,
+                    "channels_feishu_app_id": channel_config.app_id,
+                    "channels_feishu_app_secret": channel_config.app_secret,
+                    "channels_feishu_encrypt_key": channel_config.encrypt_key,
+                    "channels_feishu_verification_token": channel_config.verification_token,
+                }
+            )
+        elif group_key == "dingtalk":
+            channel_values.update(
+                {
+                    "channels_dingtalk_enabled": channel_config.enabled,
+                    "channels_dingtalk_client_id": channel_config.client_id,
+                    "channels_dingtalk_client_secret": channel_config.client_secret,
+                }
+            )
+        elif group_key == "slack":
+            channel_values.update(
+                {
+                    "channels_slack_enabled": channel_config.enabled,
+                    "channels_slack_bot_token": channel_config.bot_token,
+                    "channels_slack_app_token": channel_config.app_token,
+                }
+            )
+        elif group_key == "qq":
+            channel_values.update(
+                {
+                    "channels_qq_enabled": channel_config.enabled,
+                    "channels_qq_app_id": channel_config.app_id,
+                    "channels_qq_secret": channel_config.secret,
+                }
+            )
+        elif group_key == "matrix":
+            channel_values.update(
+                {
+                    "channels_matrix_enabled": channel_config.enabled,
+                    "channels_matrix_homeserver": channel_config.homeserver,
+                    "channels_matrix_access_token": channel_config.access_token,
+                    "channels_matrix_user_id": channel_config.user_id,
+                    "channels_matrix_device_id": channel_config.device_id,
+                }
+            )
+        elif group_key == "wecom":
+            channel_values.update(
+                {
+                    "channels_wecom_enabled": channel_config.enabled,
+                    "channels_wecom_bot_id": channel_config.bot_id,
+                    "channels_wecom_secret": channel_config.secret,
+                }
+            )
+
     return {
         "agents_defaults_workspace": config.agents.defaults.workspace,
         "agents_defaults_model": config.agents.defaults.model,
@@ -2300,12 +2827,26 @@ def _config_form_values(config: Config) -> dict[str, Any]:
         "gateway_heartbeat_keep_recent_messages": str(config.gateway.heartbeat.keep_recent_messages),
         "gateway_admin_enabled": config.gateway.admin.enabled,
         "gateway_admin_auth_key": config.gateway.admin.auth_key,
+        "gateway_status_enabled": config.gateway.status.enabled,
+        "gateway_status_auth_key": config.gateway.status.auth_key,
+        "gateway_status_push_enabled": config.gateway.status.push.enabled,
+        "gateway_status_push_office_url": config.gateway.status.push.office_url,
+        "gateway_status_push_join_key": config.gateway.status.push.join_key,
+        "gateway_status_push_agent_name": config.gateway.status.push.agent_name,
+        "gateway_status_push_timeout": str(config.gateway.status.push.timeout),
+        **channel_values,
+        "__channel_group_modes": channel_group_modes,
+        "__channel_group_enabled": channel_group_enabled,
+        "__channel_group_instances": channel_group_instances,
         "tools_restrict_to_workspace": config.tools.restrict_to_workspace,
         "tools_web_proxy": config.tools.web.proxy or "",
         "tools_web_search_provider": config.tools.web.search.provider,
         "tools_web_search_api_key": config.tools.web.search.api_key,
         "tools_web_search_base_url": config.tools.web.search.base_url,
         "tools_web_search_max_results": str(config.tools.web.search.max_results),
+        "tools_exec_enable": config.tools.exec.enable,
+        "tools_exec_timeout": str(config.tools.exec.timeout),
+        "tools_exec_path_append": config.tools.exec.path_append,
         "tools_image_gen_enabled": config.tools.image_gen.enabled,
         "tools_image_gen_api_key": config.tools.image_gen.api_key,
         "tools_image_gen_base_url": config.tools.image_gen.base_url,
@@ -2558,6 +3099,9 @@ def _apply_visual_config_values(
     for field in _CONFIG_FIELDS:
         if field.name in _MEMORIX_CONFIG_FIELD_NAMES or field.name in _PROVIDER_POOL_CONFIG_FIELD_NAMES:
             continue
+        channel_group = _CHANNEL_CONFIG_FIELD_TO_GROUP.get(field.name)
+        if channel_group and _channel_group_mode(visual_values, channel_group) == "multi":
+            continue
         value = _parse_visual_value(request, field, visual_values[field.name])
         _set_nested_value(updated, field.path, value)
     return updated
@@ -2718,6 +3262,53 @@ def _provider_group_configured_count(values: dict[str, Any], field_names: tuple[
     return sum(1 for field_name in field_names if _visual_value_present(values.get(field_name)))
 
 
+def _channel_group_mode(values: dict[str, Any], group_key: str) -> str:
+    raw = values.get("__channel_group_modes")
+    if isinstance(raw, dict):
+        mode = raw.get(group_key)
+        if mode in {"single", "multi"}:
+            return mode
+    return "single"
+
+
+def _channel_group_enabled(values: dict[str, Any], group_key: str) -> bool:
+    raw = values.get("__channel_group_enabled")
+    if isinstance(raw, dict):
+        return bool(raw.get(group_key))
+    return False
+
+
+def _channel_group_instance_count(values: dict[str, Any], group_key: str) -> int:
+    raw = values.get("__channel_group_instances")
+    if isinstance(raw, dict):
+        try:
+            return max(int(raw.get(group_key, 0)), 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _channel_group_is_configured(
+    values: dict[str, Any],
+    *,
+    group_key: str,
+    field_names: tuple[str, ...],
+) -> bool:
+    if _channel_group_enabled(values, group_key):
+        return True
+    if _channel_group_mode(values, group_key) == "multi":
+        return _channel_group_instance_count(values, group_key) > 0
+    return any(
+        _visual_value_present(values.get(field_name))
+        for field_name in field_names
+        if field_name not in _CHANNEL_GROUP_SUMMARY_URL_FIELDS and not field_name.endswith("_enabled")
+    ) or any(
+        _visual_value_present(values.get(field_name))
+        for field_name in field_names
+        if field_name in _CHANNEL_GROUP_SUMMARY_URL_FIELDS
+    )
+
+
 def _compact_provider_url(value: str) -> str:
     trimmed = value.strip()
     if not trimmed:
@@ -2850,6 +3441,124 @@ def _render_provider_groups_section(
     return f'<div class="provider-groups">{"".join(groups)}</div>'
 
 
+def _render_channel_group_summary(
+    request: web.Request,
+    *,
+    group_key: str,
+    field_names: tuple[str, ...],
+    values: dict[str, Any],
+) -> str:
+    items = [
+        _render_provider_group_chip(
+            _t(
+                request,
+                "admin_channel_group_meta_enabled"
+                if _channel_group_enabled(values, group_key)
+                else "admin_channel_group_meta_disabled",
+            )
+        )
+    ]
+    if _channel_group_mode(values, group_key) == "multi":
+        items.append(
+            _render_provider_group_chip(
+                _t(
+                    request,
+                    "admin_channel_group_meta_instances",
+                    count=_channel_group_instance_count(values, group_key),
+                )
+            )
+        )
+    else:
+        for field_name in field_names:
+            if field_name not in _CHANNEL_GROUP_SUMMARY_URL_FIELDS:
+                continue
+            raw_value = str(values.get(field_name, "")).strip()
+            if not raw_value:
+                continue
+            items.append(
+                _render_provider_group_chip(
+                    _compact_provider_url(raw_value),
+                    code=True,
+                    title=raw_value,
+                )
+            )
+        configured_count = sum(
+            1
+            for field_name in field_names
+            if field_name not in _CHANNEL_GROUP_SUMMARY_URL_FIELDS
+            and not field_name.endswith("_enabled")
+            and _visual_value_present(values.get(field_name))
+        )
+        if configured_count:
+            items.append(
+                _render_provider_group_chip(
+                    _t(request, "admin_channel_group_meta_fields", count=configured_count)
+                )
+            )
+    return (
+        f'<div class="provider-group-meta" data-channel-group-meta="{escape(group_key)}">'
+        f'{"".join(items)}'
+        "</div>"
+    )
+
+
+def _render_channel_groups_section(
+    request: web.Request,
+    *,
+    values: dict[str, Any],
+) -> str:
+    groups = []
+    for group_key, title_key, desc_key, field_names in _CHANNEL_CONFIG_GROUPS:
+        is_multi = _channel_group_mode(values, group_key) == "multi"
+        configured = _channel_group_is_configured(
+            values,
+            group_key=group_key,
+            field_names=field_names,
+        )
+        open_attr = " open" if configured or is_multi else ""
+        status_key = (
+            "admin_channel_group_multi_instance"
+            if is_multi
+            else "admin_channel_group_single_instance"
+        )
+        status_class = "pill restart" if is_multi else "pill"
+        if is_multi:
+            fields = (
+                f'<div class="notice">{_th(request, "admin_channel_group_multi_instance_notice", path=f"channels.{group_key}.instances")}</div>'
+            )
+        else:
+            fields = (
+                '<div class="provider-group-fields">'
+                + "".join(
+                    _render_config_field(request, _CONFIG_FIELD_MAP[field_name], values[field_name])
+                    for field_name in field_names
+                )
+                + "</div>"
+            )
+        summary = _render_channel_group_summary(
+            request,
+            group_key=group_key,
+            field_names=field_names,
+            values=values,
+        )
+        groups.append(
+            f'<details class="provider-group" data-channel-group="{escape(group_key)}"{open_attr}>'
+            "<summary>"
+            '<div class="provider-group-top">'
+            f'<h3 class="provider-group-title">{escape(_t(request, title_key))}</h3>'
+            f'<span class="{status_class}">{escape(_t(request, status_key))}</span>'
+            "</div>"
+            f'<div class="provider-group-desc">{_th(request, desc_key)}</div>'
+            f"{summary}"
+            "</summary>"
+            '<div class="provider-group-body">'
+            f"{fields}"
+            "</div>"
+            "</details>"
+        )
+    return f'<div class="provider-groups">{"".join(groups)}</div>'
+
+
 def _render_config_field(request: web.Request, field: ConfigFieldSpec, value: Any) -> str:
     label_row, hint = _render_field_chrome(request, field)
 
@@ -2907,6 +3616,8 @@ def _render_config_section(
     section_id = _config_section_id(title_key)
     if title_key == "admin_config_section_providers_title":
         fields = _render_provider_groups_section(request, values=values)
+    elif title_key == "admin_config_section_channels_title":
+        fields = _render_channel_groups_section(request, values=values)
     else:
         fields = "".join(
             _render_config_field(request, _CONFIG_FIELD_MAP[field_name], values[field_name])

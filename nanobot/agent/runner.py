@@ -167,6 +167,10 @@ class AgentRunner:
             stop_reason = "max_iterations"
             template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
             final_content = template.format(max_iterations=spec.max_iterations)
+            context = AgentHookContext(iteration=spec.max_iterations, messages=messages)
+            context.final_content = final_content
+            context.stop_reason = stop_reason
+            await hook.after_iteration(context)
 
         return AgentRunResult(
             final_content=final_content,

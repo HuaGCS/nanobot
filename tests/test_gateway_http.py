@@ -28,6 +28,34 @@ def test_gateway_admin_config_parses_camel_case() -> None:
     assert config.gateway.admin.auth_key == "secret-key"
 
 
+def test_gateway_status_config_parses_camel_case() -> None:
+    config = Config.model_validate(
+        {
+            "gateway": {
+                "status": {
+                    "enabled": True,
+                    "authKey": "status-secret",
+                    "push": {
+                        "enabled": True,
+                        "officeUrl": "https://office.example.com",
+                        "joinKey": "join-secret",
+                        "agentName": "nanobot-dev",
+                        "timeout": 15,
+                    },
+                }
+            }
+        }
+    )
+
+    assert config.gateway.status.enabled is True
+    assert config.gateway.status.auth_key == "status-secret"
+    assert config.gateway.status.push.enabled is True
+    assert config.gateway.status.push.office_url == "https://office.example.com"
+    assert config.gateway.status.push.join_key == "join-secret"
+    assert config.gateway.status.push.agent_name == "nanobot-dev"
+    assert config.gateway.status.push.timeout == 15
+
+
 async def _call_route(
     app,
     method: str,
@@ -35,12 +63,13 @@ async def _call_route(
     *,
     cookies: dict[str, str] | None = None,
     data: dict[str, str] | list[tuple[str, str]] | None = None,
+    headers: dict[str, str] | None = None,
 ):
-    headers = {}
+    request_headers = dict(headers or {})
     if cookies:
-        headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in cookies.items())
+        request_headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in cookies.items())
 
-    request = make_mocked_request(method, path, headers=headers, app=app)
+    request = make_mocked_request(method, path, headers=request_headers, app=app)
     if data is not None:
         form = MultiDictProxy(MultiDict(data))
 
@@ -87,6 +116,58 @@ async def test_gateway_admin_route_returns_404_when_disabled(tmp_path: Path) -> 
     response = await _call_route(app, "GET", "/admin")
 
     assert response.status == 404
+
+
+@pytest.mark.asyncio
+async def test_gateway_status_route_returns_404_when_disabled(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    save_config(Config(), config_path)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    response = await _call_route(app, "GET", "/status")
+
+    assert response.status == 404
+
+
+@pytest.mark.asyncio
+async def test_gateway_status_route_returns_tracker_snapshot_and_requires_auth(tmp_path: Path) -> None:
+    from nanobot.star_office import StarOfficeStatusTracker
+
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.gateway.status.enabled = True
+    config.gateway.status.auth_key = "status-secret"
+    save_config(config, config_path)
+
+    tracker = StarOfficeStatusTracker()
+    tracker.update(123, state="executing", detail="Running exec")
+
+    app = create_http_app(
+        config_path=config_path,
+        workspace=workspace,
+        star_office_tracker=tracker,
+    )
+
+    denied = await _call_route(app, "GET", "/status")
+    assert denied.status == 401
+
+    response = await _call_route(
+        app,
+        "GET",
+        "/status",
+        headers={"Authorization": "Bearer status-secret"},
+    )
+    assert response.status == 200
+
+    payload = json.loads(response.text)
+    assert payload["source"] == "nanobot"
+    assert payload["state"] == "executing"
+    assert payload["detail"] == "Running exec"
+    assert payload["activeRuns"] == 1
+    assert payload["updatedAt"]
+    assert payload["updatedAtMs"] > 0
 
 
 @pytest.mark.asyncio
@@ -148,6 +229,25 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert 'name="providers_openrouter_api_key"' in config_page.text
     assert 'name="providers_custom_extra_headers"' in config_page.text
     assert 'name="providers_ollama_api_base"' in config_page.text
+    assert 'name="gateway_status_enabled"' in config_page.text
+    assert 'name="gateway_status_auth_key"' in config_page.text
+    assert 'name="gateway_status_push_enabled"' in config_page.text
+    assert 'name="gateway_status_push_office_url"' in config_page.text
+    assert 'name="gateway_status_push_join_key"' in config_page.text
+    assert 'name="gateway_status_push_agent_name"' in config_page.text
+    assert 'name="gateway_status_push_timeout"' in config_page.text
+    assert "常用渠道凭据" in config_page.text
+    assert 'data-channel-group="whatsapp"' in config_page.text
+    assert 'data-channel-group="telegram"' in config_page.text
+    assert 'data-channel-group="matrix"' in config_page.text
+    assert 'name="channels_whatsapp_bridge_url"' in config_page.text
+    assert 'name="channels_whatsapp_bridge_token"' in config_page.text
+    assert 'name="channels_telegram_token"' in config_page.text
+    assert 'name="channels_telegram_proxy"' in config_page.text
+    assert 'name="channels_matrix_homeserver"' in config_page.text
+    assert 'name="tools_exec_enable"' in config_page.text
+    assert 'name="tools_exec_timeout"' in config_page.text
+    assert 'name="tools_exec_path_append"' in config_page.text
     assert 'data-provider-group="openrouter"' in config_page.text
     assert 'data-provider-group="custom"' in config_page.text
     assert 'data-provider-pool-editor' in config_page.text
@@ -161,6 +261,8 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert "默认工作区路径" in config_page.text
     assert "Mem0 预留配置" in config_page.text
     assert "Memorix MCP" in config_page.text
+    assert "Star Office 推送" in config_page.text
+    assert "Shell 执行" in config_page.text
     assert "可热重载" in config_page.text
     assert "需重启" in config_page.text
     assert 'agents.defaults.workspace</span><span class="pill hot">可热重载</span>' in config_page.text
@@ -193,7 +295,25 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
             ("mode", "visual"),
             ("__bool_fields", "tools_mcp_memorix_enabled"),
             ("__bool_fields", "memory_user_shadow_write_mem0"),
+            ("__bool_fields", "gateway_status_enabled"),
+            ("__bool_fields", "gateway_status_push_enabled"),
+            ("__bool_fields", "channels_telegram_enabled"),
+            ("__bool_fields", "tools_exec_enable"),
             ("memory_user_shadow_write_mem0", "1"),
+            ("gateway_status_enabled", "1"),
+            ("gateway_status_auth_key", "status-secret"),
+            ("gateway_status_push_enabled", "1"),
+            ("gateway_status_push_office_url", "https://office.example.com"),
+            ("gateway_status_push_join_key", "join-secret"),
+            ("gateway_status_push_agent_name", "nanobot-dev"),
+            ("gateway_status_push_timeout", "12"),
+            ("channels_whatsapp_bridge_url", "ws://localhost:3301"),
+            ("channels_whatsapp_bridge_token", "wa-bridge-token"),
+            ("channels_telegram_enabled", "1"),
+            ("channels_telegram_token", "tg-admin-token"),
+            ("channels_telegram_proxy", "socks5://127.0.0.1:1080"),
+            ("channels_matrix_homeserver", "https://matrix.example.com"),
+            ("channels_matrix_user_id", "@nanobot:example.com"),
             ("memory_user_mem0_llm_provider", "openai"),
             ("memory_user_mem0_llm_api_key", "mem0-llm-key"),
             ("memory_user_mem0_llm_url", "https://api.mem0.ai/v1"),
@@ -231,6 +351,8 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
             ("providers_custom_extra_headers", '{"APP-Code":"admin-demo"}'),
             ("providers_ollama_api_base", "http://localhost:11434/v1"),
             ("providers_vllm_api_base", "http://localhost:8000"),
+            ("tools_exec_timeout", "90"),
+            ("tools_exec_path_append", "/usr/local/bin:/usr/sbin"),
             ("channels_voice_reply_provider", "sovits"),
             ("channels_voice_reply_sovits_api_url", "http://127.0.0.1:9880"),
             ("gateway_admin_auth_key", "secret-key"),
@@ -269,6 +391,23 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert saved["memory"]["user"]["mem0"]["metadata"] == {"tenant": "paid-mem0", "env": "prod"}
     assert saved["tools"]["mcpServers"]["memorix"]["type"] == "streamableHttp"
     assert saved["tools"]["mcpServers"]["memorix"]["command"] == "memorix"
+    assert saved["gateway"]["status"]["enabled"] is True
+    assert saved["gateway"]["status"]["authKey"] == "status-secret"
+    assert saved["gateway"]["status"]["push"]["enabled"] is True
+    assert saved["gateway"]["status"]["push"]["officeUrl"] == "https://office.example.com"
+    assert saved["gateway"]["status"]["push"]["joinKey"] == "join-secret"
+    assert saved["gateway"]["status"]["push"]["agentName"] == "nanobot-dev"
+    assert saved["gateway"]["status"]["push"]["timeout"] == 12
+    assert saved["channels"]["whatsapp"]["bridgeUrl"] == "ws://localhost:3301"
+    assert saved["channels"]["whatsapp"]["bridgeToken"] == "wa-bridge-token"
+    assert saved["channels"]["telegram"]["enabled"] is True
+    assert saved["channels"]["telegram"]["token"] == "tg-admin-token"
+    assert saved["channels"]["telegram"]["proxy"] == "socks5://127.0.0.1:1080"
+    assert saved["channels"]["matrix"]["homeserver"] == "https://matrix.example.com"
+    assert saved["channels"]["matrix"]["userId"] == "@nanobot:example.com"
+    assert saved["tools"]["exec"]["enable"] is False
+    assert saved["tools"]["exec"]["timeout"] == 90
+    assert saved["tools"]["exec"]["pathAppend"] == "/usr/local/bin:/usr/sbin"
     assert saved["tools"]["mcpServers"]["memorix"]["args"] == ["serve"]
     assert saved["tools"]["mcpServers"]["memorix"]["url"] == "http://127.0.0.1:3211/mcp"
     assert saved["tools"]["mcpServers"]["memorix"]["toolTimeout"] == 75
@@ -335,6 +474,7 @@ async def test_gateway_admin_language_switch_and_raw_json_editor(tmp_path: Path)
     assert "/admin/commands" in config_page.text
     assert "Advanced JSON editor" in config_page.text
     assert "Default workspace path" in config_page.text
+    assert "Common channel credentials" in config_page.text
     assert 'name="agents_defaults_provider_pool_strategy"' in config_page.text
     assert 'name="agents_defaults_provider_pool_targets_provider"' in config_page.text
     assert 'name="agents_defaults_provider_pool_targets_model"' in config_page.text
@@ -342,6 +482,8 @@ async def test_gateway_admin_language_switch_and_raw_json_editor(tmp_path: Path)
     assert 'name="providers_custom_extra_headers"' in config_page.text
     assert 'data-provider-group="openrouter"' in config_page.text
     assert 'data-provider-group="custom"' in config_page.text
+    assert 'data-channel-group="telegram"' in config_page.text
+    assert 'name="channels_telegram_token"' in config_page.text
     assert 'data-provider-pool-move-up' in config_page.text
     assert 'data-provider-pool-move-down' in config_page.text
     assert "Mem0 Reserved Config" in config_page.text
@@ -545,6 +687,81 @@ async def test_gateway_admin_visual_provider_pool_row_requires_provider(tmp_path
 
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert "providerPool" not in saved["agents"]["defaults"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_channel_cards_preserve_multi_instance_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config.model_validate(
+        {
+            "gateway": {"admin": {"enabled": True, "authKey": "secret-key"}},
+            "channels": {
+                "telegram": {
+                    "enabled": True,
+                    "instances": [
+                        {
+                            "name": "primary",
+                            "enabled": True,
+                            "token": "instance-token",
+                            "proxy": "socks5://127.0.0.1:7890",
+                        }
+                    ],
+                }
+            },
+        }
+    )
+    save_config(config, config_path)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        cookies={"nanobot_admin_lang": "en"},
+        data={"auth_key": "secret-key", "next": "/admin/config"},
+    )
+    assert login.status == 302
+    cookie = login.cookies["nanobot_admin_session"].value
+
+    config_page = await _call_route(
+        app,
+        "GET",
+        "/admin/config",
+        cookies={"nanobot_admin_session": cookie, "nanobot_admin_lang": "en"},
+    )
+    assert config_page.status == 200
+    assert 'data-channel-group="telegram"' in config_page.text
+    telegram_group = re.search(
+        r'<details class="provider-group" data-channel-group="telegram"[^>]*>(.*?)</details>',
+        config_page.text,
+        re.S,
+    )
+    assert telegram_group is not None
+    assert "Multi-instance" in telegram_group.group(1)
+    assert "channels.telegram.instances" in telegram_group.group(1)
+    assert 'name="channels_telegram_token"' not in telegram_group.group(1)
+
+    save_resp = await _call_route(
+        app,
+        "POST",
+        "/admin/config",
+        cookies={"nanobot_admin_session": cookie, "nanobot_admin_lang": "en"},
+        data=[
+            ("mode", "visual"),
+            ("__bool_fields", "channels_telegram_enabled"),
+            ("channels_telegram_enabled", "1"),
+            ("channels_telegram_token", "should-not-apply"),
+            ("gateway_admin_auth_key", "secret-key"),
+        ],
+    )
+    assert save_resp.status == 302
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["channels"]["telegram"]["enabled"] is True
+    assert "token" not in saved["channels"]["telegram"]
+    assert saved["channels"]["telegram"]["instances"][0]["token"] == "instance-token"
+    assert saved["channels"]["telegram"]["instances"][0]["proxy"] == "socks5://127.0.0.1:7890"
 
 
 @pytest.mark.asyncio

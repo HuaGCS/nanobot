@@ -1755,8 +1755,11 @@ Behavior:
 The built-in admin UI currently covers:
 
 - Visual `config.json` editing with validation, plus an advanced raw JSON fallback
+- Visual `gateway.status` editing for Star-Office-UI-style dashboard access, including the optional bearer token used by `GET /status` and the optional direct HTTP push settings
 - Visual `agents.defaults.providerPool` editing with a row-based target editor for failover / round-robin strategy, plus add/remove and reorder controls for ordered targets
 - Visual editing for common `providers.*` blocks such as `openrouter`, `openai`, `anthropic`, `deepseek`, `custom`, `ollama`, and `vllm`, grouped into per-provider collapsible cards with safe at-a-glance summaries
+- Visual editing for common single-instance channel credential blocks such as `whatsapp`, `telegram`, `discord`, `feishu`, `dingtalk`, `slack`, `qq`, `matrix`, and `wecom`; channels already using `instances` stay read-only here and remain editable through raw JSON
+- Visual `tools.exec` editing for enabling/disabling shell execution, command timeout, and extra PATH entries
 - A dedicated command reference page with a left-side command list and right-side detail view for all chat slash commands, aliases, and usage
 - Hover help for every visual config field, so operators can inspect the effect of each option before saving
 - Every visual config field is marked directly as either `Hot reload` or `Requires restart`
@@ -1769,6 +1772,51 @@ If you change `agents.defaults.workspace` in the admin config editor, the curren
 now rebinds its runtime workspace immediately after saving. Fields explicitly marked `Requires
 restart` still need a process restart before they take effect.
 
+### Star Office UI Status
+
+nanobot can expose a small HTTP status endpoint for dashboards such as
+[`Star-Office-UI`](https://github.com/ringhyacinth/Star-Office-UI). The endpoint is disabled by
+default and is served by the same `nanobot gateway` process.
+
+```json
+{
+  "gateway": {
+    "status": {
+      "enabled": true,
+      "authKey": "optional-bearer-token",
+      "push": {
+        "enabled": true,
+        "officeUrl": "https://office.example.com",
+        "joinKey": "replace-with-your-join-key",
+        "agentName": "nanobot",
+        "timeout": 10
+      }
+    }
+  }
+}
+```
+
+Behavior:
+
+- The route is `GET /status` on the active gateway process
+- When `gateway.status.enabled` is `false`, `/status` returns `404`
+- When `gateway.status.authKey` is non-empty, send `Authorization: Bearer <authKey>`
+- The JSON payload includes stable dashboard fields such as `state`, `detail`, `updatedAt`, and `activeRuns`
+- nanobot updates this status automatically from the agent lifecycle and uses states such as `idle`, `researching`, `executing`, `syncing`, `writing`, and `error`
+- `gateway.status.push.*` can also push status directly to a Star-Office-UI instance by calling its `join-agent` / `agent-push` HTTP endpoints
+
+For `Star-Office-UI`, point its local status fetch/push script at your running gateway, for example:
+
+```bash
+python office-agent-push.py --status-url http://127.0.0.1:18790/status
+```
+
+If you configured `gateway.status.authKey`, also attach the matching bearer token in the Star Office
+side script or proxy.
+
+If you prefer direct URL push instead of polling `/status`, enable `gateway.status.push`. nanobot
+will register itself with the configured office URL and push lifecycle status updates directly over
+HTTP.
 
 ### Timezone
 
