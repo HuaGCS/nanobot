@@ -15,10 +15,10 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 _DEFAULT_IDLE_DETAIL = "Ready"
 _DEFAULT_ERROR_DETAIL = "Agent run failed"
 _PUSH_MODE_GUEST = "guest"
-_PUSH_MODE_OWNER = "owner"
+_PUSH_MODE_MAIN = "main"
 _PUSH_ROUTE_JOIN = "/join-agent"
 _PUSH_ROUTE_UPDATE = "/agent-push"
-_PUSH_ROUTE_OWNER_UPDATE = "/set_state"
+_PUSH_ROUTE_MAIN_UPDATE = "/set_state"
 _READ_ONLY_TOOL_NAMES = {
     "history_expand",
     "history_search",
@@ -68,6 +68,13 @@ def _trim_detail(detail: str | None, *, max_chars: int = 240) -> str:
     return text if len(text) <= max_chars else text[: max_chars - 3] + "..."
 
 
+def _normalize_push_mode(mode: Any) -> str:
+    normalized = str(mode or _PUSH_MODE_GUEST).strip().lower()
+    if normalized not in {_PUSH_MODE_GUEST, _PUSH_MODE_MAIN}:
+        return _PUSH_MODE_GUEST
+    return normalized
+
+
 @dataclass(slots=True, frozen=True)
 class StarOfficeSnapshot:
     """Serializable Star Office status view."""
@@ -102,30 +109,30 @@ class StarOfficePushSettings:
     agent_name: str = "nanobot"
     timeout: float = 10.0
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mode", _normalize_push_mode(self.mode))
+
     @classmethod
     def from_status_config(cls, status_config: Any) -> "StarOfficePushSettings":
         push = getattr(status_config, "push", None)
         if push is None:
             return cls()
-        mode = str(getattr(push, "mode", _PUSH_MODE_GUEST) or _PUSH_MODE_GUEST).strip().lower()
-        if mode not in {_PUSH_MODE_GUEST, _PUSH_MODE_OWNER}:
-            mode = _PUSH_MODE_GUEST
         return cls(
             enabled=bool(getattr(push, "enabled", False)),
-            mode=mode,
+            mode=_normalize_push_mode(getattr(push, "mode", _PUSH_MODE_GUEST)),
             office_url=str(getattr(push, "office_url", "") or "").strip(),
             join_key=str(getattr(push, "join_key", "") or "").strip(),
             agent_name=(str(getattr(push, "agent_name", "") or "").strip() or "nanobot"),
             timeout=float(getattr(push, "timeout", 10.0) or 10.0),
         )
 
-    def is_owner_mode(self) -> bool:
-        return self.mode == _PUSH_MODE_OWNER
+    def is_main_mode(self) -> bool:
+        return self.mode == _PUSH_MODE_MAIN
 
     def is_ready(self) -> bool:
         if not self.enabled or not self.office_url:
             return False
-        if self.is_owner_mode():
+        if self.is_main_mode():
             return True
         return bool(self.join_key)
 
@@ -208,8 +215,8 @@ class StarOfficeRemoteRelay:
             settings = self._settings
             if not settings.is_ready():
                 return
-            if settings.is_owner_mode():
-                if await self._push_owner_update(settings, snapshot):
+            if settings.is_main_mode():
+                if await self._push_main_update(settings, snapshot):
                     self._mark_success()
                 return
             if self._agent_id is None and not await self._join(settings, snapshot):
@@ -256,7 +263,7 @@ class StarOfficeRemoteRelay:
         )
         return False
 
-    async def _push_owner_update(
+    async def _push_main_update(
         self,
         settings: StarOfficePushSettings,
         snapshot: StarOfficeSnapshot,
@@ -266,14 +273,14 @@ class StarOfficeRemoteRelay:
             "detail": snapshot.detail,
         }
         data, status = await self._post_json(
-            self._build_url(settings, _PUSH_ROUTE_OWNER_UPDATE),
+            self._build_url(settings, _PUSH_ROUTE_MAIN_UPDATE),
             payload,
             settings,
         )
         if status in {200, 201} and (data.get("status") == "ok" or data.get("ok") is True):
             return True
         self._log_failure(
-            f"Star Office owner push failed ({status}): {data.get('error') or data.get('message') or 'unknown error'}"
+            f"Star Office main-state push failed ({status}): {data.get('error') or data.get('message') or 'unknown error'}"
         )
         return False
 

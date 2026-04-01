@@ -326,7 +326,7 @@ _CONFIG_FIELDS = (
         "select",
         "admin_config_gateway_status_push_mode_label",
         "admin_config_gateway_status_push_mode_hint",
-        options=("guest", "owner"),
+        options=("guest", "main"),
     ),
     ConfigFieldSpec(
         "gateway_status_push_office_url",

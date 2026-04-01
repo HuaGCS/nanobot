@@ -1805,7 +1805,7 @@ Behavior:
 - The JSON payload includes stable dashboard fields such as `state`, `detail`, `updatedAt`, and `activeRuns`
 - nanobot updates this status automatically from the agent lifecycle and uses states such as `idle`, `researching`, `executing`, `syncing`, `writing`, and `error`
 - `gateway.status.push.mode=guest` pushes as an invited agent by calling `join-agent` / `agent-push`, and requires `joinKey`
-- `gateway.status.push.mode=owner` pushes the main office state by calling `set_state`, and does not require `joinKey`
+- `gateway.status.push.mode=main` drives the built-in main office agent by calling `set_state`, and does not require `joinKey`
 
 For `Star-Office-UI`, point its local status fetch/push script at your running gateway, for example:
 
@@ -1819,7 +1819,7 @@ side script or proxy.
 If you prefer direct URL push instead of polling `/status`, enable `gateway.status.push`. nanobot
 can either register itself as a guest agent or drive the main office state directly over HTTP.
 
-Owner-mode example:
+Main-agent example:
 
 ```json
 {
@@ -1827,7 +1827,7 @@ Owner-mode example:
     "status": {
       "push": {
         "enabled": true,
-        "mode": "owner",
+        "mode": "main",
         "officeUrl": "http://127.0.0.1:19000",
         "timeout": 10
       }
@@ -1835,6 +1835,7 @@ Owner-mode example:
   }
 }
 ```
+
 
 ### Timezone
 

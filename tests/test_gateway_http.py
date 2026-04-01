@@ -58,14 +58,14 @@ def test_gateway_status_config_parses_camel_case() -> None:
     assert config.gateway.status.push.timeout == 15
 
 
-def test_gateway_status_owner_push_config_allows_blank_join_key() -> None:
+def test_gateway_status_main_push_config_allows_blank_join_key() -> None:
     config = Config.model_validate(
         {
             "gateway": {
                 "status": {
                     "push": {
                         "enabled": True,
-                        "mode": "owner",
+                        "mode": "main",
                         "officeUrl": "http://127.0.0.1:19000",
                         "timeout": 8,
                     }
@@ -75,7 +75,7 @@ def test_gateway_status_owner_push_config_allows_blank_join_key() -> None:
     )
 
     assert config.gateway.status.push.enabled is True
-    assert config.gateway.status.push.mode == "owner"
+    assert config.gateway.status.push.mode == "main"
     assert config.gateway.status.push.join_key == ""
     assert config.gateway.status.push.office_url == "http://127.0.0.1:19000"
 
@@ -793,7 +793,7 @@ async def test_gateway_admin_channel_cards_preserve_multi_instance_config(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_gateway_admin_visual_owner_push_mode_allows_blank_join_key(tmp_path: Path) -> None:
+async def test_gateway_admin_visual_main_push_mode_allows_blank_join_key(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
     config = Config()
@@ -819,10 +819,10 @@ async def test_gateway_admin_visual_owner_push_mode_allows_blank_join_key(tmp_pa
             ("mode", "visual"),
             ("__bool_fields", "gateway_status_push_enabled"),
             ("gateway_status_push_enabled", "1"),
-            ("gateway_status_push_mode", "owner"),
+            ("gateway_status_push_mode", "main"),
             ("gateway_status_push_office_url", "http://127.0.0.1:19000"),
             ("gateway_status_push_join_key", ""),
-            ("gateway_status_push_agent_name", "nanobot-owner"),
+            ("gateway_status_push_agent_name", "nanobot-main"),
             ("gateway_status_push_timeout", "9"),
             ("gateway_admin_auth_key", "secret-key"),
         ],
@@ -831,10 +831,10 @@ async def test_gateway_admin_visual_owner_push_mode_allows_blank_join_key(tmp_pa
 
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["gateway"]["status"]["push"]["enabled"] is True
-    assert saved["gateway"]["status"]["push"]["mode"] == "owner"
+    assert saved["gateway"]["status"]["push"]["mode"] == "main"
     assert saved["gateway"]["status"]["push"]["officeUrl"] == "http://127.0.0.1:19000"
     assert saved["gateway"]["status"]["push"]["joinKey"] == ""
-    assert saved["gateway"]["status"]["push"]["agentName"] == "nanobot-owner"
+    assert saved["gateway"]["status"]["push"]["agentName"] == "nanobot-main"
     assert saved["gateway"]["status"]["push"]["timeout"] == 9
 
 

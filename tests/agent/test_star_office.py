@@ -267,7 +267,7 @@ async def test_star_office_tracker_rejoins_after_push_failure(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_star_office_tracker_owner_mode_pushes_main_state(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_star_office_tracker_main_mode_pushes_main_state(monkeypatch: pytest.MonkeyPatch) -> None:
     from nanobot import star_office as star_office_module
 
     calls: list[dict[str, object]] = []
@@ -283,7 +283,7 @@ async def test_star_office_tracker_owner_mode_pushes_main_state(monkeypatch: pyt
     tracker = StarOfficeStatusTracker(
         push_settings=StarOfficePushSettings(
             enabled=True,
-            mode="owner",
+            mode="main",
             office_url="http://127.0.0.1:19000",
             timeout=9.0,
         )

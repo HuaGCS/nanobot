@@ -636,7 +636,7 @@ class GatewayStatusPushConfig(Base):
     """Optional Star Office UI push configuration."""
 
     enabled: bool = False
-    mode: Literal["guest", "owner"] = "guest"
+    mode: Literal["guest", "main"] = "guest"
     office_url: str = ""
     join_key: str = ""
     agent_name: str = "nanobot"
