@@ -1786,6 +1786,7 @@ default and is served by the same `nanobot gateway` process.
       "authKey": "optional-bearer-token",
       "push": {
         "enabled": true,
+        "mode": "guest",
         "officeUrl": "https://office.example.com",
         "joinKey": "replace-with-your-join-key",
         "agentName": "nanobot",
@@ -1803,7 +1804,8 @@ Behavior:
 - When `gateway.status.authKey` is non-empty, send `Authorization: Bearer <authKey>`
 - The JSON payload includes stable dashboard fields such as `state`, `detail`, `updatedAt`, and `activeRuns`
 - nanobot updates this status automatically from the agent lifecycle and uses states such as `idle`, `researching`, `executing`, `syncing`, `writing`, and `error`
-- `gateway.status.push.*` can also push status directly to a Star-Office-UI instance by calling its `join-agent` / `agent-push` HTTP endpoints
+- `gateway.status.push.mode=guest` pushes as an invited agent by calling `join-agent` / `agent-push`, and requires `joinKey`
+- `gateway.status.push.mode=owner` pushes the main office state by calling `set_state`, and does not require `joinKey`
 
 For `Star-Office-UI`, point its local status fetch/push script at your running gateway, for example:
 
@@ -1815,8 +1817,24 @@ If you configured `gateway.status.authKey`, also attach the matching bearer toke
 side script or proxy.
 
 If you prefer direct URL push instead of polling `/status`, enable `gateway.status.push`. nanobot
-will register itself with the configured office URL and push lifecycle status updates directly over
-HTTP.
+can either register itself as a guest agent or drive the main office state directly over HTTP.
+
+Owner-mode example:
+
+```json
+{
+  "gateway": {
+    "status": {
+      "push": {
+        "enabled": true,
+        "mode": "owner",
+        "officeUrl": "http://127.0.0.1:19000",
+        "timeout": 10
+      }
+    }
+  }
+}
+```
 
 ### Timezone
 

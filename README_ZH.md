@@ -1089,6 +1089,7 @@ nanobot 可以额外暴露一个很小的 HTTP 状态接口，方便接入
       "authKey": "optional-bearer-token",
       "push": {
         "enabled": true,
+        "mode": "guest",
         "officeUrl": "https://office.example.com",
         "joinKey": "replace-with-your-join-key",
         "agentName": "nanobot",
@@ -1106,7 +1107,8 @@ nanobot 可以额外暴露一个很小的 HTTP 状态接口，方便接入
 - 如果 `gateway.status.authKey` 非空，请在请求头里带上 `Authorization: Bearer <authKey>`
 - 返回 JSON 会包含 `state`、`detail`、`updatedAt`、`activeRuns` 等稳定字段
 - nanobot 会根据 agent 生命周期自动刷新状态，当前会使用 `idle`、`researching`、`executing`、`syncing`、`writing`、`error` 这些状态值
-- `gateway.status.push.*` 还可以直接调用 Star-Office-UI 的 `join-agent` / `agent-push` HTTP 接口，把状态主动推送过去
+- `gateway.status.push.mode=guest` 会作为访客 Agent 调用 `join-agent` / `agent-push`，此时必须填写 `joinKey`
+- `gateway.status.push.mode=owner` 会直接调用主办公室的 `set_state`，此时不需要 `joinKey`
 
 接 `Star-Office-UI` 时，把它本地轮询/推送脚本指向你的 gateway 即可，例如：
 
@@ -1118,7 +1120,24 @@ python office-agent-push.py --status-url http://127.0.0.1:18790/status
 Bearer Token。
 
 如果你不想轮询 `/status`，也可以直接开启 `gateway.status.push`。开启后，nanobot 会主动向
-配置好的 Star-Office-UI 地址注册自己，并在运行状态变化时直接通过 HTTP 推送更新。
+配置好的 Star-Office-UI 地址推送运行状态；既可以作为访客 Agent 注册，也可以直接驱动主办公室状态。
+
+主人模式示例：
+
+```json
+{
+  "gateway": {
+    "status": {
+      "push": {
+        "enabled": true,
+        "mode": "owner",
+        "officeUrl": "http://127.0.0.1:19000",
+        "timeout": 10
+      }
+    }
+  }
+}
+```
 
 ### 时区
 

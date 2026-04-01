@@ -37,6 +37,7 @@ def test_gateway_status_config_parses_camel_case() -> None:
                     "authKey": "status-secret",
                     "push": {
                         "enabled": True,
+                        "mode": "guest",
                         "officeUrl": "https://office.example.com",
                         "joinKey": "join-secret",
                         "agentName": "nanobot-dev",
@@ -50,10 +51,33 @@ def test_gateway_status_config_parses_camel_case() -> None:
     assert config.gateway.status.enabled is True
     assert config.gateway.status.auth_key == "status-secret"
     assert config.gateway.status.push.enabled is True
+    assert config.gateway.status.push.mode == "guest"
     assert config.gateway.status.push.office_url == "https://office.example.com"
     assert config.gateway.status.push.join_key == "join-secret"
     assert config.gateway.status.push.agent_name == "nanobot-dev"
     assert config.gateway.status.push.timeout == 15
+
+
+def test_gateway_status_owner_push_config_allows_blank_join_key() -> None:
+    config = Config.model_validate(
+        {
+            "gateway": {
+                "status": {
+                    "push": {
+                        "enabled": True,
+                        "mode": "owner",
+                        "officeUrl": "http://127.0.0.1:19000",
+                        "timeout": 8,
+                    }
+                }
+            }
+        }
+    )
+
+    assert config.gateway.status.push.enabled is True
+    assert config.gateway.status.push.mode == "owner"
+    assert config.gateway.status.push.join_key == ""
+    assert config.gateway.status.push.office_url == "http://127.0.0.1:19000"
 
 
 async def _call_route(
@@ -232,6 +256,7 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert 'name="gateway_status_enabled"' in config_page.text
     assert 'name="gateway_status_auth_key"' in config_page.text
     assert 'name="gateway_status_push_enabled"' in config_page.text
+    assert 'name="gateway_status_push_mode"' in config_page.text
     assert 'name="gateway_status_push_office_url"' in config_page.text
     assert 'name="gateway_status_push_join_key"' in config_page.text
     assert 'name="gateway_status_push_agent_name"' in config_page.text
@@ -303,6 +328,7 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
             ("gateway_status_enabled", "1"),
             ("gateway_status_auth_key", "status-secret"),
             ("gateway_status_push_enabled", "1"),
+            ("gateway_status_push_mode", "guest"),
             ("gateway_status_push_office_url", "https://office.example.com"),
             ("gateway_status_push_join_key", "join-secret"),
             ("gateway_status_push_agent_name", "nanobot-dev"),
@@ -394,6 +420,7 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert saved["gateway"]["status"]["enabled"] is True
     assert saved["gateway"]["status"]["authKey"] == "status-secret"
     assert saved["gateway"]["status"]["push"]["enabled"] is True
+    assert saved["gateway"]["status"]["push"]["mode"] == "guest"
     assert saved["gateway"]["status"]["push"]["officeUrl"] == "https://office.example.com"
     assert saved["gateway"]["status"]["push"]["joinKey"] == "join-secret"
     assert saved["gateway"]["status"]["push"]["agentName"] == "nanobot-dev"
@@ -480,6 +507,7 @@ async def test_gateway_admin_language_switch_and_raw_json_editor(tmp_path: Path)
     assert 'name="agents_defaults_provider_pool_targets_model"' in config_page.text
     assert 'name="providers_openrouter_api_key"' in config_page.text
     assert 'name="providers_custom_extra_headers"' in config_page.text
+    assert 'name="gateway_status_push_mode"' in config_page.text
     assert 'data-provider-group="openrouter"' in config_page.text
     assert 'data-provider-group="custom"' in config_page.text
     assert 'data-channel-group="telegram"' in config_page.text
@@ -762,6 +790,52 @@ async def test_gateway_admin_channel_cards_preserve_multi_instance_config(tmp_pa
     assert "token" not in saved["channels"]["telegram"]
     assert saved["channels"]["telegram"]["instances"][0]["token"] == "instance-token"
     assert saved["channels"]["telegram"]["instances"][0]["proxy"] == "socks5://127.0.0.1:7890"
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_visual_owner_push_mode_allows_blank_join_key(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.gateway.admin.enabled = True
+    config.gateway.admin.auth_key = "secret-key"
+    save_config(config, config_path)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        data={"auth_key": "secret-key", "next": "/admin"},
+    )
+    cookie = login.cookies["nanobot_admin_session"].value
+
+    save_resp = await _call_route(
+        app,
+        "POST",
+        "/admin/config",
+        cookies={"nanobot_admin_session": cookie},
+        data=[
+            ("mode", "visual"),
+            ("__bool_fields", "gateway_status_push_enabled"),
+            ("gateway_status_push_enabled", "1"),
+            ("gateway_status_push_mode", "owner"),
+            ("gateway_status_push_office_url", "http://127.0.0.1:19000"),
+            ("gateway_status_push_join_key", ""),
+            ("gateway_status_push_agent_name", "nanobot-owner"),
+            ("gateway_status_push_timeout", "9"),
+            ("gateway_admin_auth_key", "secret-key"),
+        ],
+    )
+    assert save_resp.status == 302
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["gateway"]["status"]["push"]["enabled"] is True
+    assert saved["gateway"]["status"]["push"]["mode"] == "owner"
+    assert saved["gateway"]["status"]["push"]["officeUrl"] == "http://127.0.0.1:19000"
+    assert saved["gateway"]["status"]["push"]["joinKey"] == ""
+    assert saved["gateway"]["status"]["push"]["agentName"] == "nanobot-owner"
+    assert saved["gateway"]["status"]["push"]["timeout"] == 9
 
 
 @pytest.mark.asyncio

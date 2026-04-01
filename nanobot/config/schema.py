@@ -636,10 +636,18 @@ class GatewayStatusPushConfig(Base):
     """Optional Star Office UI push configuration."""
 
     enabled: bool = False
+    mode: Literal["guest", "owner"] = "guest"
     office_url: str = ""
     join_key: str = ""
     agent_name: str = "nanobot"
     timeout: float = Field(default=10.0, gt=0.0)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _normalize_mode(cls, value: Any) -> str:
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+        return "guest"
 
     @field_validator("agent_name", mode="before")
     @classmethod
@@ -652,7 +660,7 @@ class GatewayStatusPushConfig(Base):
     def _validate_required_fields(self) -> "GatewayStatusPushConfig":
         if self.enabled and not self.office_url.strip():
             raise ValueError("gateway.status.push.officeUrl is required when push is enabled")
-        if self.enabled and not self.join_key.strip():
+        if self.enabled and self.mode == "guest" and not self.join_key.strip():
             raise ValueError("gateway.status.push.joinKey is required when push is enabled")
         return self
 

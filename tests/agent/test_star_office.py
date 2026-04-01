@@ -264,3 +264,41 @@ async def test_star_office_tracker_rejoins_after_push_failure(monkeypatch: pytes
             "timeout": 10.0,
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_star_office_tracker_owner_mode_pushes_main_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nanobot import star_office as star_office_module
+
+    calls: list[dict[str, object]] = []
+    responses = [
+        _FakeResponse({"status": "ok"}),
+    ]
+
+    def _client_factory(*args, **kwargs):
+        return _FakeAsyncClient(responses, calls, *args, **kwargs)
+
+    monkeypatch.setattr(star_office_module.httpx, "AsyncClient", _client_factory)
+
+    tracker = StarOfficeStatusTracker(
+        push_settings=StarOfficePushSettings(
+            enabled=True,
+            mode="owner",
+            office_url="http://127.0.0.1:19000",
+            timeout=9.0,
+        )
+    )
+
+    tracker.publish_current()
+    await tracker.flush()
+
+    assert calls == [
+        {
+            "url": "http://127.0.0.1:19000/set_state",
+            "json": {
+                "state": "idle",
+                "detail": "Ready",
+            },
+            "timeout": 9.0,
+        }
+    ]

@@ -321,6 +321,14 @@ _CONFIG_FIELDS = (
         "admin_config_gateway_status_push_enabled_label",
     ),
     ConfigFieldSpec(
+        "gateway_status_push_mode",
+        ("gateway", "status", "push", "mode"),
+        "select",
+        "admin_config_gateway_status_push_mode_label",
+        "admin_config_gateway_status_push_mode_hint",
+        options=("guest", "owner"),
+    ),
+    ConfigFieldSpec(
         "gateway_status_push_office_url",
         ("gateway", "status", "push", "officeUrl"),
         "text",
@@ -1349,6 +1357,7 @@ _CONFIG_SECTIONS = (
         "admin_config_section_status_push_desc",
         (
             "gateway_status_push_enabled",
+            "gateway_status_push_mode",
             "gateway_status_push_office_url",
             "gateway_status_push_join_key",
             "gateway_status_push_agent_name",
@@ -2830,6 +2839,7 @@ def _config_form_values(config: Config) -> dict[str, Any]:
         "gateway_status_enabled": config.gateway.status.enabled,
         "gateway_status_auth_key": config.gateway.status.auth_key,
         "gateway_status_push_enabled": config.gateway.status.push.enabled,
+        "gateway_status_push_mode": config.gateway.status.push.mode,
         "gateway_status_push_office_url": config.gateway.status.push.office_url,
         "gateway_status_push_join_key": config.gateway.status.push.join_key,
         "gateway_status_push_agent_name": config.gateway.status.push.agent_name,

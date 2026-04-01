@@ -14,14 +14,17 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 
 _DEFAULT_IDLE_DETAIL = "Ready"
 _DEFAULT_ERROR_DETAIL = "Agent run failed"
+_PUSH_MODE_GUEST = "guest"
+_PUSH_MODE_OWNER = "owner"
 _PUSH_ROUTE_JOIN = "/join-agent"
 _PUSH_ROUTE_UPDATE = "/agent-push"
+_PUSH_ROUTE_OWNER_UPDATE = "/set_state"
 _READ_ONLY_TOOL_NAMES = {
     "history_expand",
     "history_search",
     "list_dir",
     "read_file",
-    "web_fetch"
+    "web_fetch",
     "web_search",
 }
 _WRITE_TOOL_NAMES = {
@@ -93,6 +96,7 @@ class StarOfficePushSettings:
     """HTTP push settings for Star Office UI integration."""
 
     enabled: bool = False
+    mode: str = _PUSH_MODE_GUEST
     office_url: str = ""
     join_key: str = ""
     agent_name: str = "nanobot"
@@ -103,13 +107,27 @@ class StarOfficePushSettings:
         push = getattr(status_config, "push", None)
         if push is None:
             return cls()
+        mode = str(getattr(push, "mode", _PUSH_MODE_GUEST) or _PUSH_MODE_GUEST).strip().lower()
+        if mode not in {_PUSH_MODE_GUEST, _PUSH_MODE_OWNER}:
+            mode = _PUSH_MODE_GUEST
         return cls(
             enabled=bool(getattr(push, "enabled", False)),
+            mode=mode,
             office_url=str(getattr(push, "office_url", "") or "").strip(),
             join_key=str(getattr(push, "join_key", "") or "").strip(),
             agent_name=(str(getattr(push, "agent_name", "") or "").strip() or "nanobot"),
             timeout=float(getattr(push, "timeout", 10.0) or 10.0),
         )
+
+    def is_owner_mode(self) -> bool:
+        return self.mode == _PUSH_MODE_OWNER
+
+    def is_ready(self) -> bool:
+        if not self.enabled or not self.office_url:
+            return False
+        if self.is_owner_mode():
+            return True
+        return bool(self.join_key)
 
 
 class StarOfficeRemoteRelay:
@@ -135,7 +153,7 @@ class StarOfficeRemoteRelay:
         if self._closed:
             return
         settings = self._settings
-        if not settings.enabled or not settings.office_url or not settings.join_key:
+        if not settings.is_ready():
             return
         try:
             loop = asyncio.get_running_loop()
@@ -188,7 +206,11 @@ class StarOfficeRemoteRelay:
     async def _push(self, snapshot: StarOfficeSnapshot) -> None:
         async with self._lock:
             settings = self._settings
-            if not settings.enabled or not settings.office_url or not settings.join_key:
+            if not settings.is_ready():
+                return
+            if settings.is_owner_mode():
+                if await self._push_owner_update(settings, snapshot):
+                    self._mark_success()
                 return
             if self._agent_id is None and not await self._join(settings, snapshot):
                 return
@@ -231,6 +253,27 @@ class StarOfficeRemoteRelay:
             return True
         self._log_failure(
             f"Star Office agent push failed ({status}): {data.get('error') or data.get('message') or 'unknown error'}"
+        )
+        return False
+
+    async def _push_owner_update(
+        self,
+        settings: StarOfficePushSettings,
+        snapshot: StarOfficeSnapshot,
+    ) -> bool:
+        payload = {
+            "state": snapshot.state,
+            "detail": snapshot.detail,
+        }
+        data, status = await self._post_json(
+            self._build_url(settings, _PUSH_ROUTE_OWNER_UPDATE),
+            payload,
+            settings,
+        )
+        if status in {200, 201} and (data.get("status") == "ok" or data.get("ok") is True):
+            return True
+        self._log_failure(
+            f"Star Office owner push failed ({status}): {data.get('error') or data.get('message') or 'unknown error'}"
         )
         return False
 
