@@ -65,19 +65,27 @@ class Nanobot:
         provider = _make_provider(config)
         bus = MessageBus()
         defaults = config.agents.defaults
+        runtime_config_path = getattr(config, "_config_path", None)
 
         loop = AgentLoop(
             bus=bus,
             provider=provider,
             workspace=config.workspace_path,
+            config_path=runtime_config_path,
             model=defaults.model,
             max_iterations=defaults.max_tool_iterations,
             context_window_tokens=defaults.context_window_tokens,
-            web_search_config=config.tools.web.search,
+            brave_api_key=config.tools.web.search.api_key or None,
             web_proxy=config.tools.web.proxy or None,
+            web_search_provider=config.tools.web.search.provider,
+            web_search_base_url=config.tools.web.search.base_url or None,
+            web_search_max_results=config.tools.web.search.max_results,
             exec_config=config.tools.exec,
+            image_gen_config=config.tools.image_gen,
+            memory_config=config.memory,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
+            channels_config=config.channels,
             timezone=defaults.timezone,
         )
         return cls(loop)
@@ -112,15 +120,60 @@ class Nanobot:
 
 
 def _make_provider(config: Any) -> Any:
-    """Create the LLM provider from config (extracted from CLI)."""
+    """Create the configured LLM provider or provider pool from config."""
+    defaults = config.agents.defaults
+    provider_pool = defaults.provider_pool
+    if provider_pool and provider_pool.targets:
+        from nanobot.providers.pool_provider import ProviderPoolEntry, ProviderPoolProvider
+
+        entries = [
+            ProviderPoolEntry(
+                name=target.provider,
+                model=target.model,
+                provider=_make_single_provider(
+                    config,
+                    model=target.model or defaults.model,
+                    provider_name=target.provider,
+                ),
+            )
+            for target in provider_pool.targets
+        ]
+        pooled = ProviderPoolProvider(
+            entries,
+            strategy=provider_pool.strategy,
+            default_model=defaults.model,
+        )
+        pooled.generation = entries[0].provider.generation
+        return pooled
+
+    return _make_single_provider(config, model=defaults.model)
+
+
+def _make_single_provider(
+    config: Any,
+    *,
+    model: str,
+    provider_name: str | None = None,
+) -> Any:
+    """Create one provider instance from config."""
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    model = config.agents.defaults.model
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
-    spec = find_by_name(provider_name) if provider_name else None
+    resolved_provider_name = provider_name or config.get_provider_name(model)
+    spec = find_by_name(resolved_provider_name) if resolved_provider_name else None
+    if provider_name and spec is None:
+        raise ValueError(f"Unknown provider: {provider_name}")
+
+    if spec is not None:
+        p = getattr(config.providers, spec.name, None)
+    else:
+        p = config.get_provider(model)
     backend = spec.backend if spec else "openai_compat"
+    api_base = None
+    if p and p.api_base:
+        api_base = p.api_base
+    elif spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
+        api_base = spec.default_api_base
 
     if backend == "azure_openai":
         if not p or not p.api_key or not p.api_base:
@@ -150,7 +203,7 @@ def _make_provider(config: Any) -> Any:
 
         provider = AnthropicProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_base=api_base,
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
@@ -159,7 +212,7 @@ def _make_provider(config: Any) -> Any:
 
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_base=api_base,
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             spec=spec,
