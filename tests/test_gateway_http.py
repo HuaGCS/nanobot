@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 from multidict import MultiDict, MultiDictProxy
 
+import nanobot.gateway.admin as admin_mod
 from nanobot.config.loader import save_config
 from nanobot.config.schema import Config
 from nanobot.gateway.http import create_http_app
@@ -265,11 +267,15 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert 'data-channel-group="whatsapp"' in config_page.text
     assert 'data-channel-group="telegram"' in config_page.text
     assert 'data-channel-group="matrix"' in config_page.text
+    assert 'data-channel-group="weixin"' in config_page.text
     assert 'name="channels_whatsapp_bridge_url"' in config_page.text
     assert 'name="channels_whatsapp_bridge_token"' in config_page.text
     assert 'name="channels_telegram_token"' in config_page.text
     assert 'name="channels_telegram_proxy"' in config_page.text
     assert 'name="channels_matrix_homeserver"' in config_page.text
+    assert 'name="channels_weixin_allow_from"' in config_page.text
+    assert 'name="channels_weixin_token"' in config_page.text
+    assert 'name="channels_weixin_poll_timeout"' in config_page.text
     assert 'name="tools_exec_enable"' in config_page.text
     assert 'name="tools_exec_timeout"' in config_page.text
     assert 'name="tools_exec_path_append"' in config_page.text
@@ -323,6 +329,7 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
             ("__bool_fields", "gateway_status_enabled"),
             ("__bool_fields", "gateway_status_push_enabled"),
             ("__bool_fields", "channels_telegram_enabled"),
+            ("__bool_fields", "channels_weixin_enabled"),
             ("__bool_fields", "tools_exec_enable"),
             ("memory_user_shadow_write_mem0", "1"),
             ("gateway_status_enabled", "1"),
@@ -340,6 +347,12 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
             ("channels_telegram_proxy", "socks5://127.0.0.1:1080"),
             ("channels_matrix_homeserver", "https://matrix.example.com"),
             ("channels_matrix_user_id", "@nanobot:example.com"),
+            ("channels_weixin_enabled", "1"),
+            ("channels_weixin_allow_from", "wxid_alpha, wxid_beta"),
+            ("channels_weixin_token", "wx-token"),
+            ("channels_weixin_route_tag", "blue-route"),
+            ("channels_weixin_state_dir", "/tmp/nanobot-weixin"),
+            ("channels_weixin_poll_timeout", "42"),
             ("memory_user_mem0_llm_provider", "openai"),
             ("memory_user_mem0_llm_api_key", "mem0-llm-key"),
             ("memory_user_mem0_llm_url", "https://api.mem0.ai/v1"),
@@ -432,6 +445,12 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert saved["channels"]["telegram"]["proxy"] == "socks5://127.0.0.1:1080"
     assert saved["channels"]["matrix"]["homeserver"] == "https://matrix.example.com"
     assert saved["channels"]["matrix"]["userId"] == "@nanobot:example.com"
+    assert saved["channels"]["weixin"]["enabled"] is True
+    assert saved["channels"]["weixin"]["allowFrom"] == ["wxid_alpha", "wxid_beta"]
+    assert saved["channels"]["weixin"]["token"] == "wx-token"
+    assert saved["channels"]["weixin"]["routeTag"] == "blue-route"
+    assert saved["channels"]["weixin"]["stateDir"] == "/tmp/nanobot-weixin"
+    assert saved["channels"]["weixin"]["pollTimeout"] == 42
     assert saved["tools"]["exec"]["enable"] is False
     assert saved["tools"]["exec"]["timeout"] == 90
     assert saved["tools"]["exec"]["pathAppend"] == "/usr/local/bin:/usr/sbin"
@@ -511,7 +530,9 @@ async def test_gateway_admin_language_switch_and_raw_json_editor(tmp_path: Path)
     assert 'data-provider-group="openrouter"' in config_page.text
     assert 'data-provider-group="custom"' in config_page.text
     assert 'data-channel-group="telegram"' in config_page.text
+    assert 'data-channel-group="weixin"' in config_page.text
     assert 'name="channels_telegram_token"' in config_page.text
+    assert 'name="channels_weixin_allow_from"' in config_page.text
     assert 'data-provider-pool-move-up' in config_page.text
     assert 'data-provider-pool-move-down' in config_page.text
     assert "Mem0 Reserved Config" in config_page.text
@@ -836,6 +857,137 @@ async def test_gateway_admin_visual_main_push_mode_allows_blank_join_key(tmp_pat
     assert saved["gateway"]["status"]["push"]["joinKey"] == ""
     assert saved["gateway"]["status"]["push"]["agentName"] == "nanobot-main"
     assert saved["gateway"]["status"]["push"]["timeout"] == 9
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_weixin_login_page_starts_and_renders_pending_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.gateway.admin.enabled = True
+    config.gateway.admin.auth_key = "secret-key"
+    save_config(config, config_path)
+
+    async def _fake_start(_request, *, force: bool):
+        assert force is False
+        now = time.time()
+        return admin_mod.WeixinAdminLoginSession(
+            session_id="weixin-session",
+            qrcode_id="qr-1",
+            scan_url="weixin://qr/demo",
+            qr_image_data_url="data:image/svg+xml;base64,qr-demo",
+            poll_base_url="https://ilinkai.weixin.qq.com",
+            started_at=now,
+            updated_at=now,
+        )
+
+    async def _fake_advance(_request, session):
+        return session
+
+    monkeypatch.setattr(admin_mod, "_start_weixin_login_session", _fake_start)
+    monkeypatch.setattr(admin_mod, "_advance_weixin_login_session", _fake_advance)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        cookies={"nanobot_admin_lang": "en"},
+        data={"auth_key": "secret-key", "next": "/admin/weixin"},
+    )
+    cookie = login.cookies["nanobot_admin_session"].value
+
+    start_resp = await _call_route(
+        app,
+        "POST",
+        "/admin/weixin/start",
+        cookies={"nanobot_admin_session": cookie, "nanobot_admin_lang": "en"},
+        data={},
+    )
+    assert start_resp.status == 302
+    assert start_resp.headers["Location"] == "/admin/weixin?session=weixin-session"
+
+    page = await _call_route(
+        app,
+        "GET",
+        "/admin/weixin?session=weixin-session",
+        cookies={"nanobot_admin_session": cookie, "nanobot_admin_lang": "en"},
+    )
+    assert page.status == 200
+    assert "Weixin QR Login" in page.text
+    assert "Saved channel state" in page.text
+    assert 'src="data:image/svg+xml;base64,qr-demo"' in page.text
+    assert "weixin://qr/demo" in page.text
+    assert "Stop polling" in page.text
+    assert 'href="/admin/weixin"' in page.text
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_weixin_login_page_handles_confirm_and_cancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.gateway.admin.enabled = True
+    config.gateway.admin.auth_key = "secret-key"
+    save_config(config, config_path)
+
+    async def _fake_advance(_request, session):
+        session.status = "confirmed"
+        session.bot_id = "bot-123"
+        session.user_id = "wx-user"
+        return session
+
+    monkeypatch.setattr(admin_mod, "_advance_weixin_login_session", _fake_advance)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    app[admin_mod._ADMIN_WEIXIN_LOGIN_SESSIONS_KEY] = {
+        "weixin-session": admin_mod.WeixinAdminLoginSession(
+            session_id="weixin-session",
+            qrcode_id="qr-1",
+            scan_url="weixin://qr/demo",
+            qr_image_data_url=None,
+            poll_base_url="https://ilinkai.weixin.qq.com",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+    }
+
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        cookies={"nanobot_admin_lang": "en"},
+        data={"auth_key": "secret-key", "next": "/admin/weixin"},
+    )
+    cookie = login.cookies["nanobot_admin_session"].value
+
+    page = await _call_route(
+        app,
+        "GET",
+        "/admin/weixin?session=weixin-session",
+        cookies={"nanobot_admin_session": cookie, "nanobot_admin_lang": "en"},
+    )
+    assert page.status == 200
+    assert "Weixin login confirmed" in page.text
+    assert "bot-123" in page.text
+    assert "wx-user" in page.text
+
+    cancel_resp = await _call_route(
+        app,
+        "POST",
+        "/admin/weixin/cancel",
+        cookies={"nanobot_admin_session": cookie, "nanobot_admin_lang": "en"},
+        data={"session": "weixin-session"},
+    )
+    assert cancel_resp.status == 302
+    assert cancel_resp.headers["Location"] == "/admin/weixin?cancelled=1"
+    assert app[admin_mod._ADMIN_WEIXIN_LOGIN_SESSIONS_KEY] == {}
 
 
 @pytest.mark.asyncio

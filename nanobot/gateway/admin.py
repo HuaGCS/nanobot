@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import io
 import json
 import re
 import secrets
@@ -15,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
+import httpx
 from aiohttp import web
 
 from nanobot.agent.i18n import language_label, normalize_language_code
@@ -42,10 +45,12 @@ _DEFAULT_ADMIN_LANG = "zh"
 _ADMIN_CONFIG_PATH_KEY = web.AppKey("admin_config_path", Path)
 _ADMIN_WORKSPACE_KEY = web.AppKey("admin_workspace_path", Path)
 _ADMIN_RELOAD_RUNTIME_KEY = web.AppKey("admin_reload_runtime", object)
+_ADMIN_WEIXIN_LOGIN_SESSIONS_KEY = web.AppKey("admin_weixin_login_sessions", object)
 _MEMORIX_MCP_SERVER_NAME = "memorix"
 _MEMORIX_MCP_DEFAULT_COMMAND = "memorix"
 _MEMORIX_MCP_DEFAULT_ARGS = ("serve",)
 _MEMORIX_MCP_DEFAULT_TIMEOUT = 60
+_WEIXIN_ADMIN_SESSION_TTL_S = 15 * 60
 
 
 @dataclass(frozen=True)
@@ -73,6 +78,24 @@ class CommandDocSpec:
     usage_text_key: str | None = None
     aliases: tuple[str, ...] = ()
     note_key: str | None = None
+
+
+@dataclass
+class WeixinAdminLoginSession:
+    """Ephemeral Weixin QR-login state stored by the admin UI."""
+
+    session_id: str
+    qrcode_id: str
+    scan_url: str
+    qr_image_data_url: str | None
+    poll_base_url: str
+    started_at: float
+    updated_at: float
+    status: str = "pending"
+    refresh_count: int = 0
+    bot_id: str = ""
+    user_id: str = ""
+    error: str = ""
 
 
 _CONFIG_FIELDS = (
@@ -556,6 +579,51 @@ _CONFIG_FIELDS = (
         ("channels", "matrix", "deviceId"),
         "text",
         "admin_config_channels_matrix_device_id_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_weixin_enabled",
+        ("channels", "weixin", "enabled"),
+        "bool",
+        "admin_config_channels_weixin_enabled_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_weixin_allow_from",
+        ("channels", "weixin", "allowFrom"),
+        "csv",
+        "admin_config_channels_weixin_allow_from_label",
+        "admin_config_channels_weixin_allow_from_hint",
+        placeholder="*",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_weixin_token",
+        ("channels", "weixin", "token"),
+        "text",
+        "admin_config_channels_weixin_token_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_weixin_route_tag",
+        ("channels", "weixin", "routeTag"),
+        "text",
+        "admin_config_channels_weixin_route_tag_label",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_weixin_state_dir",
+        ("channels", "weixin", "stateDir"),
+        "text",
+        "admin_config_channels_weixin_state_dir_label",
+        placeholder="~/.nanobot/weixin",
+        restart_required=True,
+    ),
+    ConfigFieldSpec(
+        "channels_weixin_poll_timeout",
+        ("channels", "weixin", "pollTimeout"),
+        "int",
+        "admin_config_channels_weixin_poll_timeout_label",
         restart_required=True,
     ),
     ConfigFieldSpec(
@@ -1273,6 +1341,19 @@ _CHANNEL_CONFIG_GROUPS = (
         ),
     ),
     (
+        "weixin",
+        "admin_channel_group_weixin_title",
+        "admin_channel_group_weixin_desc",
+        (
+            "channels_weixin_enabled",
+            "channels_weixin_allow_from",
+            "channels_weixin_token",
+            "channels_weixin_route_tag",
+            "channels_weixin_state_dir",
+            "channels_weixin_poll_timeout",
+        ),
+    ),
+    (
         "wecom",
         "admin_channel_group_wecom_title",
         "admin_channel_group_wecom_desc",
@@ -1504,6 +1585,7 @@ def register_admin_routes(
     """Register built-in admin routes for the current gateway instance."""
     app[_ADMIN_CONFIG_PATH_KEY] = config_path
     app[_ADMIN_WORKSPACE_KEY] = workspace
+    app[_ADMIN_WEIXIN_LOGIN_SESSIONS_KEY] = {}
     if reload_runtime is not None:
         app[_ADMIN_RELOAD_RUNTIME_KEY] = reload_runtime
     app.router.add_get("/admin", _admin_index)
@@ -1512,6 +1594,9 @@ def register_admin_routes(
     app.router.add_post("/admin/logout", _admin_logout)
     app.router.add_get("/admin/config", _admin_config_page)
     app.router.add_post("/admin/config", _admin_config_submit)
+    app.router.add_get("/admin/weixin", _admin_weixin_page)
+    app.router.add_post("/admin/weixin/start", _admin_weixin_start)
+    app.router.add_post("/admin/weixin/cancel", _admin_weixin_cancel)
     app.router.add_get("/admin/commands", _admin_commands_page)
     app.router.add_get("/admin/personas", _admin_personas_page)
     app.router.add_post("/admin/personas/new", _admin_persona_create)
@@ -1534,6 +1619,201 @@ def _runtime_workspace(request: web.Request) -> Path:
 
 def _load_current_config(request: web.Request) -> Config:
     return load_config(_current_config_path(request))
+
+
+def _weixin_login_sessions(request: web.Request) -> dict[str, WeixinAdminLoginSession]:
+    raw = request.app[_ADMIN_WEIXIN_LOGIN_SESSIONS_KEY]
+    if isinstance(raw, dict):
+        return raw
+    sessions: dict[str, WeixinAdminLoginSession] = {}
+    request.app[_ADMIN_WEIXIN_LOGIN_SESSIONS_KEY] = sessions
+    return sessions
+
+
+def _prune_weixin_login_sessions(request: web.Request) -> None:
+    cutoff = time.time() - _WEIXIN_ADMIN_SESSION_TTL_S
+    sessions = _weixin_login_sessions(request)
+    for session_id in list(sessions):
+        session = sessions[session_id]
+        if session.updated_at < cutoff:
+            sessions.pop(session_id, None)
+
+
+def _weixin_qr_image_data_url(url: str) -> str | None:
+    try:
+        import qrcode
+        from qrcode.image.svg import SvgPathImage
+    except ImportError:
+        return None
+
+    qr = qrcode.QRCode(border=1, box_size=8)
+    qr.add_data(url)
+    qr.make(fit=True)
+    image = qr.make_image(image_factory=SvgPathImage)
+    output = io.BytesIO()
+    image.save(output)
+    encoded = base64.b64encode(output.getvalue()).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+def _weixin_state_file_path(request: web.Request, channel_config: Any) -> Path:
+    state_root = (
+        Path(channel_config.state_dir).expanduser()
+        if getattr(channel_config, "state_dir", "")
+        else _current_config_path(request).parent / "weixin"
+    )
+    return state_root / "account.json"
+
+
+def _weixin_saved_state_snapshot(request: web.Request, channel_config: Any) -> dict[str, Any]:
+    state_file = _weixin_state_file_path(request, channel_config)
+    snapshot = {
+        "state_file": state_file,
+        "token_present": False,
+        "base_url": "",
+        "context_tokens": 0,
+        "cursor_present": False,
+    }
+    if not state_file.exists():
+        return snapshot
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+    except Exception:
+        return snapshot
+    context_tokens = data.get("context_tokens")
+    snapshot["token_present"] = bool(str(data.get("token", "")).strip())
+    snapshot["base_url"] = str(data.get("base_url", "") or "").strip()
+    snapshot["context_tokens"] = len(context_tokens) if isinstance(context_tokens, dict) else 0
+    snapshot["cursor_present"] = bool(str(data.get("get_updates_buf", "") or "").strip())
+    return snapshot
+
+
+def _clear_weixin_saved_state(request: web.Request, channel_config: Any) -> None:
+    state_file = _weixin_state_file_path(request, channel_config)
+    if state_file.exists():
+        state_file.unlink()
+
+
+async def _start_weixin_login_session(
+    request: web.Request,
+    *,
+    force: bool,
+) -> WeixinAdminLoginSession:
+    from nanobot.channels.weixin import WeixinChannel
+
+    config = _load_current_config(request)
+    channel_config = config.channels.weixin
+    if force:
+        _clear_weixin_saved_state(request, channel_config)
+
+    channel = WeixinChannel(channel_config, None)  # type: ignore[arg-type]
+    channel._client = httpx.AsyncClient(
+        timeout=httpx.Timeout(60, connect=30),
+        follow_redirects=True,
+    )
+    try:
+        qrcode_id, scan_url = await channel._fetch_qr_code()
+    finally:
+        await channel._client.aclose()
+        channel._client = None
+
+    now = time.time()
+    return WeixinAdminLoginSession(
+        session_id=secrets.token_urlsafe(12),
+        qrcode_id=qrcode_id,
+        scan_url=scan_url,
+        qr_image_data_url=_weixin_qr_image_data_url(scan_url),
+        poll_base_url=channel_config.base_url,
+        started_at=now,
+        updated_at=now,
+    )
+
+
+async def _advance_weixin_login_session(
+    request: web.Request,
+    session: WeixinAdminLoginSession,
+) -> WeixinAdminLoginSession:
+    from nanobot.channels.weixin import MAX_QR_REFRESH_COUNT, WeixinChannel
+
+    if session.status in {"confirmed", "error"}:
+        return session
+
+    config = _load_current_config(request)
+    channel_config = config.channels.weixin
+    channel = WeixinChannel(channel_config, None)  # type: ignore[arg-type]
+    if not channel.config.state_dir:
+        channel.config.state_dir = str(_current_config_path(request).parent / "weixin")
+    channel._client = httpx.AsyncClient(
+        timeout=httpx.Timeout(60, connect=30),
+        follow_redirects=True,
+    )
+    try:
+        try:
+            status_data = await channel._api_get_with_base(
+                base_url=session.poll_base_url,
+                endpoint="ilink/bot/get_qrcode_status",
+                params={"qrcode": session.qrcode_id},
+                auth=False,
+            )
+        except Exception as exc:
+            if channel._is_retryable_qr_poll_error(exc):
+                session.updated_at = time.time()
+                return session
+            session.status = "error"
+            session.error = str(exc)
+            session.updated_at = time.time()
+            return session
+
+        if not isinstance(status_data, dict):
+            session.updated_at = time.time()
+            return session
+
+        status = str(status_data.get("status", "") or "").strip()
+        session.updated_at = time.time()
+        if status == "confirmed":
+            token = str(status_data.get("bot_token", "") or "").strip()
+            if not token:
+                session.status = "error"
+                session.error = _t(request, "admin_weixin_error_missing_token")
+                return session
+            base_url = str(status_data.get("baseurl", "") or "").strip()
+            if base_url:
+                channel.config.base_url = base_url
+            channel._token = token
+            channel._save_state()
+            session.status = "confirmed"
+            session.bot_id = str(status_data.get("ilink_bot_id", "") or "").strip()
+            session.user_id = str(status_data.get("ilink_user_id", "") or "").strip()
+            session.error = ""
+            return session
+
+        if status == "scaned_but_redirect":
+            redirect_host = str(status_data.get("redirect_host", "") or "").strip()
+            if redirect_host:
+                session.poll_base_url = (
+                    redirect_host
+                    if redirect_host.startswith(("http://", "https://"))
+                    else f"https://{redirect_host}"
+                )
+            return session
+
+        if status == "expired":
+            session.refresh_count += 1
+            if session.refresh_count > MAX_QR_REFRESH_COUNT:
+                session.status = "error"
+                session.error = _t(request, "admin_weixin_error_expired_too_many")
+                return session
+            qrcode_id, scan_url = await channel._fetch_qr_code()
+            session.qrcode_id = qrcode_id
+            session.scan_url = scan_url
+            session.qr_image_data_url = _weixin_qr_image_data_url(scan_url)
+            session.poll_base_url = channel.config.base_url
+            return session
+
+        return session
+    finally:
+        await channel._client.aclose()
+        channel._client = None
 
 
 def _load_raw_config_data(request: web.Request) -> dict[str, Any]:
@@ -1718,6 +1998,7 @@ def _page(
             '<nav class="nav">'
             f'{_nav_link(request, "/admin", "admin_nav_overview")}'
             f'{_nav_link(request, "/admin/config", "admin_nav_config")}'
+            f'{_nav_link(request, "/admin/weixin", "admin_nav_weixin")}'
             f'{_nav_link(request, "/admin/commands", "admin_nav_commands")}'
             f'{_nav_link(request, "/admin/personas", "admin_nav_personas")}'
             '<form method="post" action="/admin/logout" class="inline-form">'
@@ -2408,6 +2689,43 @@ def _page(
       display: grid;
       gap: 8px;
     }}
+    .inline-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }}
+    .state-grid {{
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }}
+    .weixin-status {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+    }}
+    .qr-shell {{
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      align-items: start;
+    }}
+    .qr-preview {{
+      display: grid;
+      place-items: center;
+      min-height: 240px;
+      padding: 16px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }}
+    .qr-preview img {{
+      display: block;
+      width: min(100%, 240px);
+      height: auto;
+    }}
     code {{
       font-family: "IBM Plex Mono", "Noto Sans Mono", monospace;
       font-size: 13px;
@@ -2560,6 +2878,9 @@ def _page(
       }}
       .provider-pool-row-actions {{
         justify-content: flex-start;
+      }}
+      .qr-shell {{
+        grid-template-columns: 1fr;
       }}
     }}
   </style>
@@ -2788,6 +3109,19 @@ def _config_form_values(config: Config) -> dict[str, Any]:
                     "channels_matrix_access_token": channel_config.access_token,
                     "channels_matrix_user_id": channel_config.user_id,
                     "channels_matrix_device_id": channel_config.device_id,
+                }
+            )
+        elif group_key == "weixin":
+            channel_values.update(
+                {
+                    "channels_weixin_enabled": channel_config.enabled,
+                    "channels_weixin_allow_from": ", ".join(channel_config.allow_from),
+                    "channels_weixin_token": channel_config.token,
+                    "channels_weixin_route_tag": (
+                        "" if channel_config.route_tag is None else str(channel_config.route_tag)
+                    ),
+                    "channels_weixin_state_dir": channel_config.state_dir or "",
+                    "channels_weixin_poll_timeout": str(channel_config.poll_timeout),
                 }
             )
         elif group_key == "wecom":
@@ -3545,6 +3879,12 @@ def _render_channel_groups_section(
                 )
                 + "</div>"
             )
+            if group_key == "weixin":
+                fields += (
+                    '<div class="actions">'
+                    f'<a class="nav-link active" href="/admin/weixin">{escape(_t(request, "admin_weixin_open_from_config"))}</a>'
+                    "</div>"
+                )
         summary = _render_channel_group_summary(
             request,
             group_key=group_key,
@@ -3796,6 +4136,11 @@ async def _admin_index(request: web.Request) -> web.Response:
           <strong>{escape(_t(request, "admin_card_config"))}</strong>
           <p class="muted">{_th(request, "admin_card_config_desc")}</p>
           <a class="nav-link active" href="/admin/config">{escape(_t(request, "admin_card_config_open"))}</a>
+        </div>
+        <div class="card stack feature-card">
+          <strong>{escape(_t(request, "admin_card_weixin"))}</strong>
+          <p class="muted">{_th(request, "admin_card_weixin_desc")}</p>
+          <a class="nav-link active" href="/admin/weixin">{escape(_t(request, "admin_card_weixin_open"))}</a>
         </div>
         <div class="card stack feature-card">
           <strong>{escape(_t(request, "admin_card_personas"))}</strong>
@@ -4089,6 +4434,210 @@ async def _admin_config_submit(request: web.Request) -> web.Response:
             )
         raise _redirect(request, "/admin/config?saved=1&reloaded=1")
     raise _redirect(request, "/admin/config?saved=1")
+
+
+def _render_weixin_page(
+    request: web.Request,
+    *,
+    session: WeixinAdminLoginSession | None,
+    flash: str | None = None,
+    error: str | None = None,
+) -> web.Response:
+    config = _load_current_config(request)
+    channel_config = config.channels.weixin
+    saved_state = _weixin_saved_state_snapshot(request, channel_config)
+    config_token_present = bool(channel_config.token.strip())
+    state_notice = (
+        _th(request, "admin_weixin_config_token_notice")
+        if config_token_present
+        else _th(request, "admin_weixin_state_file_notice")
+    )
+
+    session_card = f"""
+      <section class="card stack">
+        <div class="section-head">
+          <h2>{escape(_t(request, "admin_weixin_qr_title"))}</h2>
+          <div class="muted">{_th(request, "admin_weixin_qr_desc")}</div>
+        </div>
+        <div class="notice">{state_notice}</div>
+      </section>
+    """
+    auto_refresh_script = ""
+
+    if session is not None:
+        status_map = {
+            "pending": ("pill hot", _t(request, "admin_weixin_status_pending")),
+            "confirmed": ("pill hot", _t(request, "admin_weixin_status_confirmed")),
+            "error": ("pill restart", _t(request, "admin_weixin_status_error")),
+        }
+        status_class, status_label = status_map.get(
+            session.status,
+            ("pill", escape(session.status)),
+        )
+        qr_preview = (
+            f'<div class="qr-preview"><img src="{escape(session.qr_image_data_url)}" alt="{escape(_t(request, "admin_weixin_qr_alt"))}"></div>'
+            if session.qr_image_data_url
+            else f'<div class="notice">{_th(request, "admin_weixin_qr_no_image")}</div>'
+        )
+        details = [
+            f'<div class="weixin-status"><span class="{status_class}">{escape(status_label)}</span></div>',
+            f'<div class="muted">{escape(_t(request, "admin_weixin_label_session"))}: <code>{escape(session.session_id)}</code></div>',
+            f'<div class="muted">{escape(_t(request, "admin_weixin_label_poll_base"))}: <code>{escape(session.poll_base_url)}</code></div>',
+            f'<div class="muted">{escape(_t(request, "admin_weixin_label_refresh_count"))}: <code>{session.refresh_count}</code></div>',
+        ]
+        if session.bot_id:
+            details.append(
+                f'<div class="muted">{escape(_t(request, "admin_weixin_label_bot_id"))}: <code>{escape(session.bot_id)}</code></div>'
+            )
+        if session.user_id:
+            details.append(
+                f'<div class="muted">{escape(_t(request, "admin_weixin_label_user_id"))}: <code>{escape(session.user_id)}</code></div>'
+            )
+        if session.error:
+            details.append(f'<div class="notice error">{escape(session.error)}</div>')
+        actions = ""
+        if session.status == "pending":
+            actions = f"""
+              <div class="inline-actions">
+                <form method="post" action="/admin/weixin/cancel" class="inline-form">
+                  <input type="hidden" name="session" value="{escape(session.session_id)}">
+                  <button type="submit" class="ghost">{escape(_t(request, "admin_weixin_cancel"))}</button>
+                </form>
+              </div>
+            """
+            auto_refresh_script = f"""
+              <script>
+                setTimeout(() => {{
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("session", "{escape(session.session_id)}");
+                  window.location.replace(url.toString());
+                }}, 2000);
+              </script>
+            """
+        session_card = f"""
+          <section class="card stack">
+            <div class="section-head">
+              <h2>{escape(_t(request, "admin_weixin_qr_title"))}</h2>
+              <div class="muted">{_th(request, "admin_weixin_qr_desc")}</div>
+            </div>
+            <div class="qr-shell">
+              {qr_preview}
+              <div class="stack">
+                {''.join(details)}
+                <pre class="code-block"><code>{escape(session.scan_url)}</code></pre>
+                <div class="muted">{_th(request, "admin_weixin_scan_hint")}</div>
+                {actions}
+              </div>
+            </div>
+          </section>
+          {auto_refresh_script}
+        """
+
+    body = f"""
+      <div class="section-layout">
+        <aside class="sticky-stack">
+          <div class="card stack spotlight">
+            <span class="eyebrow">{escape(_t(request, "admin_nav_weixin"))}</span>
+            <p class="muted">{_th(request, "admin_weixin_intro")}</p>
+            <div class="inline-actions">
+              <form method="post" action="/admin/weixin/start" class="inline-form">
+                <button type="submit">{escape(_t(request, "admin_weixin_start"))}</button>
+              </form>
+              <form method="post" action="/admin/weixin/start" class="inline-form">
+                <input type="hidden" name="force" value="1">
+                <button type="submit" class="ghost">{escape(_t(request, "admin_weixin_force_start"))}</button>
+              </form>
+            </div>
+          </div>
+          <div class="card stack">
+            <div class="section-head">
+              <h2>{escape(_t(request, "admin_weixin_saved_state_title"))}</h2>
+              <div class="muted">{_th(request, "admin_weixin_saved_state_desc")}</div>
+            </div>
+            <div class="state-grid">
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_weixin_label_state_file"))}</span>
+                <strong><code>{escape(str(saved_state["state_file"]))}</code></strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_weixin_label_saved_token"))}</span>
+                <strong>{escape(_t(request, "admin_boolean_true" if saved_state["token_present"] else "admin_boolean_false"))}</strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_weixin_label_config_token"))}</span>
+                <strong>{escape(_t(request, "admin_boolean_true" if config_token_present else "admin_boolean_false"))}</strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_weixin_label_context_tokens"))}</span>
+                <strong>{saved_state["context_tokens"]}</strong>
+              </div>
+            </div>
+          </div>
+        </aside>
+        <div class="stack">
+          {session_card}
+        </div>
+      </div>
+    """
+    return _page(
+        title=_t(request, "admin_weixin_title"),
+        heading=_t(request, "admin_weixin_heading"),
+        body=body,
+        request=request,
+        flash=flash,
+        error=error,
+    )
+
+
+async def _admin_weixin_page(request: web.Request) -> web.Response:
+    _require_admin_auth(request)
+    _prune_weixin_login_sessions(request)
+    sessions = _weixin_login_sessions(request)
+    session = None
+    flash = None
+    error = None
+    session_id = str(request.query.get("session", "") or "").strip()
+    if request.query.get("cancelled") == "1":
+        flash = _t(request, "admin_weixin_cancelled_flash")
+    if session_id:
+        session = sessions.get(session_id)
+        if session is None:
+            error = _t(request, "admin_weixin_missing_session")
+        else:
+            session = await _advance_weixin_login_session(request, session)
+            sessions[session_id] = session
+            if session.status == "confirmed":
+                flash = _t(request, "admin_weixin_confirmed_flash")
+            elif session.status == "error" and session.error:
+                error = _t(request, "admin_weixin_status_error_detail", error=session.error)
+    return _render_weixin_page(request, session=session, flash=flash, error=error)
+
+
+async def _admin_weixin_start(request: web.Request) -> web.Response:
+    _require_admin_auth(request)
+    _prune_weixin_login_sessions(request)
+    form = await request.post()
+    force = str(form.get("force", "")).lower() in {"1", "true", "on", "yes"}
+    try:
+        session = await _start_weixin_login_session(request, force=force)
+    except Exception as exc:
+        return _render_weixin_page(
+            request,
+            session=None,
+            error=_t(request, "admin_weixin_start_failed", error=exc),
+        )
+    sessions = _weixin_login_sessions(request)
+    sessions[session.session_id] = session
+    raise _redirect(request, f"/admin/weixin?session={quote(session.session_id, safe='')}")
+
+
+async def _admin_weixin_cancel(request: web.Request) -> web.Response:
+    _require_admin_auth(request)
+    form = await request.post()
+    session_id = str(form.get("session", "") or "").strip()
+    if session_id:
+        _weixin_login_sessions(request).pop(session_id, None)
+    raise _redirect(request, "/admin/weixin?cancelled=1")
 
 
 def _command_usage_lines(request: web.Request, spec: CommandDocSpec) -> list[str]:

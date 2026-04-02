@@ -353,6 +353,19 @@ class QQMultiConfig(Base):
     instances: list[QQInstanceConfig] = Field(default_factory=list)
 
 
+class WeixinConfig(Base):
+    """Personal WeChat (Weixin) channel configuration."""
+
+    enabled: bool = False
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+    base_url: str = "https://ilinkai.weixin.qq.com"
+    cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
+    route_tag: str | int | None = None
+    token: str = ""  # Saved QR-login token or manually supplied token
+    state_dir: str = ""  # Optional state directory for token/buffer persistence
+    poll_timeout: int = 35
+
+
 class WecomConfig(Base):
     """WeCom (Enterprise WeChat) AI Bot channel configuration."""
 
@@ -442,6 +455,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig | SlackMultiConfig = Field(default_factory=SlackConfig)
     qq: QQConfig | QQMultiConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig | MatrixMultiConfig = Field(default_factory=MatrixConfig)
+    weixin: WeixinConfig = Field(default_factory=WeixinConfig)
     wecom: WecomConfig | WecomMultiConfig = Field(default_factory=WecomConfig)
 
     @field_validator(

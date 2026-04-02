@@ -1758,7 +1758,8 @@ The built-in admin UI currently covers:
 - Visual `gateway.status` editing for Star-Office-UI-style dashboard access, including the optional bearer token used by `GET /status` and the optional direct HTTP push settings
 - Visual `agents.defaults.providerPool` editing with a row-based target editor for failover / round-robin strategy, plus add/remove and reorder controls for ordered targets
 - Visual editing for common `providers.*` blocks such as `openrouter`, `openai`, `anthropic`, `deepseek`, `custom`, `ollama`, and `vllm`, grouped into per-provider collapsible cards with safe at-a-glance summaries
-- Visual editing for common single-instance channel credential blocks such as `whatsapp`, `telegram`, `discord`, `feishu`, `dingtalk`, `slack`, `qq`, `matrix`, and `wecom`; channels already using `instances` stay read-only here and remain editable through raw JSON
+- Visual editing for common single-instance channel credential blocks such as `whatsapp`, `telegram`, `discord`, `feishu`, `dingtalk`, `slack`, `qq`, `matrix`, `weixin`, and `wecom`; channels already using `instances` stay read-only here and remain editable through raw JSON
+- A dedicated Weixin QR-login page inside admin, so the current instance can request and poll a personal Weixin login QR code without leaving the UI; successful scans save the token into the current instance's Weixin state file
 - Visual `tools.exec` editing for enabling/disabling shell execution, command timeout, and extra PATH entries
 - A dedicated command reference page with a left-side command list and right-side detail view for all chat slash commands, aliases, and usage
 - Hover help for every visual config field, so operators can inspect the effect of each option before saving
