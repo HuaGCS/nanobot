@@ -124,7 +124,7 @@ def load_persona_manifest(workspace: Path, persona: str | None) -> dict[str, Any
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         logger.warning("Failed to load persona manifest {}: {}", path, exc)
         return {}
 
