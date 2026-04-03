@@ -51,7 +51,7 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1 etc.
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
-    
+
     @property
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
@@ -159,6 +159,82 @@ class LLMProvider(ABC):
             sanitized.append(clean)
         return sanitized
 
+    @staticmethod
+    def _stringify_error_detail(value: Any) -> str | None:
+        """Return a compact error string for exception payloads and nested causes."""
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            text = value.decode("utf-8", errors="replace")
+        elif isinstance(value, (dict, list, tuple)):
+            try:
+                text = json.dumps(value, ensure_ascii=False)
+            except TypeError:
+                text = str(value)
+        else:
+            text = str(value)
+        compact = re.sub(r"\s+", " ", text).strip()
+        return compact or None
+
+    @classmethod
+    def _extract_error_detail(cls, exc: BaseException) -> str | None:
+        """Prefer provider/server payloads over generic SDK exception strings."""
+        response = getattr(exc, "response", None)
+        for candidate in (
+            getattr(exc, "doc", None),
+            getattr(exc, "body", None),
+            getattr(response, "text", None),
+            getattr(response, "content", None),
+        ):
+            detail = cls._stringify_error_detail(candidate)
+            if detail:
+                return detail[:500]
+        return None
+
+    @classmethod
+    def _format_exception_summary(cls, exc: BaseException) -> str:
+        detail = cls._stringify_error_detail(exc)
+        name = exc.__class__.__name__
+        if not detail:
+            return name
+        lowered = detail.lower()
+        if lowered == name.lower() or lowered.startswith(f"{name.lower()}:"):
+            return detail
+        return f"{name}: {detail}"
+
+    @classmethod
+    def _format_exception_chain(cls, exc: BaseException, *, max_depth: int = 3) -> str:
+        parts: list[str] = []
+        seen: set[int] = set()
+        current: BaseException | None = exc
+        while current is not None and id(current) not in seen and len(parts) < max_depth:
+            seen.add(id(current))
+            summary = cls._format_exception_summary(current)
+            if summary and summary not in parts:
+                parts.append(summary)
+            current = current.__cause__ or current.__context__
+        if not parts:
+            return exc.__class__.__name__
+        if len(parts) == 1:
+            return parts[0]
+        return f"{parts[0]}; caused by " + "; caused by ".join(parts[1:])
+
+    @classmethod
+    def _error_response(
+        cls,
+        exc: Exception,
+        *,
+        prefix: str = "Error calling LLM",
+    ) -> LLMResponse:
+        """Build an LLM error response without hiding the actionable root cause."""
+        detail = cls._extract_error_detail(exc)
+        if detail:
+            return LLMResponse(content=f"Error: {detail}", finish_reason="error")
+        return LLMResponse(
+            content=f"{prefix}: {cls._format_exception_chain(exc)}",
+            finish_reason="error",
+        )
+
     @abstractmethod
     async def chat(
         self,
@@ -172,7 +248,7 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """
         Send a chat completion request.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions.
@@ -180,7 +256,7 @@ class LLMProvider(ABC):
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
             tool_choice: Tool selection strategy ("auto", "required", or specific tool dict).
-        
+
         Returns:
             LLMResponse with content and/or tool calls.
         """
@@ -220,7 +296,7 @@ class LLMProvider(ABC):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            return self._error_response(exc)
 
     async def chat_stream(
         self,
@@ -256,7 +332,7 @@ class LLMProvider(ABC):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            return self._error_response(exc)
 
     async def chat_stream_with_retry(
         self,

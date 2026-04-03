@@ -285,6 +285,11 @@ If you want automatic failover or request-level rotation across multiple configu
 - If a target omits `model`, nanobot uses `agents.defaults.model`.
 - A non-empty `providerPool` takes precedence over `agents.defaults.provider`.
 
+If provider logs show `Error calling LLM`, nanobot now preserves nested transport causes such as
+DNS failures, TLS verification errors, and `Connection refused`. A plain connection failure usually
+means the configured `apiBase` or proxy path is unreachable, not that the remote endpoint merely
+rejected a model or route.
+
 ### Optional: Web Search
 
 `web_search` supports both Brave Search and SearXNG.

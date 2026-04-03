@@ -174,6 +174,10 @@ nanobot gateway
 - 某个 target 没写 `model` 时，会回退到 `agents.defaults.model`。
 - 只要 `providerPool.targets` 非空，就会优先于 `agents.defaults.provider` 生效。
 
+如果 provider 日志里出现 `Error calling LLM`，nanobot 现在会尽量保留底层传输错误原因，
+例如 DNS 失败、TLS 校验失败、`Connection refused` 等。纯粹的连接错误通常更像
+`apiBase` / 代理 / 网关不可达，而不是远端接口单纯“不支持这个模型或路由”。
+
 ### Web 搜索
 
 `web_search` 支持 Brave Search 和 SearXNG。

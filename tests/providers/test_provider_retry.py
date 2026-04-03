@@ -24,6 +24,19 @@ class ScriptedProvider(LLMProvider):
         return "test-model"
 
 
+def test_error_response_keeps_nested_connection_cause() -> None:
+    provider = ScriptedProvider([])
+    err = RuntimeError("Connection error.")
+    err.__cause__ = OSError("[Errno 111] Connection refused")
+
+    response = provider._error_response(err)
+
+    assert response.finish_reason == "error"
+    assert response.content is not None
+    assert "RuntimeError: Connection error." in response.content
+    assert "OSError: [Errno 111] Connection refused" in response.content
+
+
 @pytest.mark.asyncio
 async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch) -> None:
     provider = ScriptedProvider([
@@ -262,5 +275,4 @@ async def test_persistent_retry_aborts_after_ten_identical_transient_errors(monk
     assert response.content == "429 rate limit"
     assert provider.calls == 10
     assert delays == [1, 2, 4, 4, 4, 4, 4, 4, 4]
-
 

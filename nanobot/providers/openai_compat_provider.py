@@ -571,9 +571,7 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        body = getattr(e, "doc", None) or getattr(getattr(e, "response", None), "text", None)
-        msg = f"Error: {body.strip()[:500]}" if body and body.strip() else f"Error calling LLM: {e}"
-        return LLMResponse(content=msg, finish_reason="error")
+        return OpenAICompatProvider._error_response(e)
 
     # ------------------------------------------------------------------
     # Public API

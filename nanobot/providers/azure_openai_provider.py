@@ -113,9 +113,7 @@ class AzureOpenAIProvider(LLMProvider):
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        body = getattr(e, "body", None) or getattr(getattr(e, "response", None), "text", None)
-        msg = f"Error: {str(body).strip()[:500]}" if body else f"Error calling Azure OpenAI: {e}"
-        return LLMResponse(content=msg, finish_reason="error")
+        return AzureOpenAIProvider._error_response(e, prefix="Error calling Azure OpenAI")
 
     # ------------------------------------------------------------------
     # Public API

@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
-from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -419,7 +418,7 @@ class AnthropicProvider(LLMProvider):
             response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            return self._error_response(e)
 
     async def chat_stream(
         self,
@@ -464,7 +463,7 @@ class AnthropicProvider(LLMProvider):
                 finish_reason="error",
             )
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            return self._error_response(e)
 
     def get_default_model(self) -> str:
         return self.default_model

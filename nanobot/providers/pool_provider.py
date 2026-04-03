@@ -114,7 +114,7 @@ class ProviderPoolProvider(LLMProvider):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            response = LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            response = self._error_response(exc)
         return response, deltas
 
     async def _dispatch(

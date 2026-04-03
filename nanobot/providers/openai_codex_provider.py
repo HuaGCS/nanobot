@@ -79,7 +79,7 @@ class OpenAICodexProvider(LLMProvider):
                 )
             return LLMResponse(content=content, tool_calls=tool_calls, finish_reason=finish_reason)
         except Exception as e:
-            return LLMResponse(content=f"Error calling Codex: {e}", finish_reason="error")
+            return self._error_response(e, prefix="Error calling Codex")
 
     async def chat(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
