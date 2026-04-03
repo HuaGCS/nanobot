@@ -1280,7 +1280,7 @@ def channels_status(
 ):
     """Show channel status."""
     from nanobot.channels.registry import discover_channel_names, load_channel_class
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:

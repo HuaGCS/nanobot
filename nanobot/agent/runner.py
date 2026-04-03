@@ -107,28 +107,7 @@ class AgentRunner:
             tool_definitions = spec.tools.get_definitions()
             request_messages = hook.prepare_messages(context, tool_definitions)
             context.request_messages = list(request_messages)
-            kwargs: dict[str, Any] = {
-                "messages": request_messages,
-                "tools": tool_definitions,
-                "model": spec.model,
-            }
-            if spec.temperature is not None:
-                kwargs["temperature"] = spec.temperature
-            if spec.max_tokens is not None:
-                kwargs["max_tokens"] = spec.max_tokens
-            if spec.reasoning_effort is not None:
-                kwargs["reasoning_effort"] = spec.reasoning_effort
-
-            if hook.wants_streaming():
-                async def _stream(delta: str) -> None:
-                    await hook.on_stream(context, delta)
-
-                response = await self.provider.chat_stream_with_retry(
-                    **kwargs,
-                    on_content_delta=_stream,
-                )
-            else:
-                response = await self.provider.chat_with_retry(**kwargs)
+            response = await self._request_model(spec, request_messages, hook, context)
 
             raw_usage = response.usage or {}
             context.response = response
@@ -209,7 +188,9 @@ class AgentRunner:
                 await hook.after_iteration(context)
                 continue
 
-            clean = hook.finalize_content(context, response.content)
+            normalized = hook.normalize_content(context, response.content)
+            clean = hook.finalize_content(context, normalized)
+            stream_closed = False
             if response.finish_reason != "error" and is_blank_text(clean):
                 logger.warning(
                     "Empty final response on turn {} for {}; retrying with explicit finalization prompt",
@@ -218,6 +199,7 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
+                    stream_closed = True
                 response = await self._request_finalization_retry(spec, messages_for_model)
                 retry_usage = self._usage_dict(response.usage)
                 self._accumulate_usage(usage, retry_usage)
@@ -225,13 +207,11 @@ class AgentRunner:
                 context.response = response
                 context.usage = dict(raw_usage)
                 context.tool_calls = list(response.tool_calls)
-                clean = hook.finalize_content(context, response.content)
+                normalized = hook.normalize_content(context, response.content)
+                clean = hook.finalize_content(context, normalized)
 
-            if hook.wants_streaming():
+            if hook.wants_streaming() and not stream_closed:
                 await hook.on_stream_end(context, resuming=False)
-
-            normalized = hook.normalize_content(context, response.content)
-            clean = hook.finalize_content(context, normalized)
             if response.finish_reason == "error":
                 final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
                 stop_reason = "error"
@@ -278,6 +258,7 @@ class AgentRunner:
             stop_reason = "max_iterations"
             template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
             final_content = template.format(max_iterations=spec.max_iterations)
+            self._append_final_message(messages, final_content)
             context = AgentHookContext(iteration=spec.max_iterations, messages=messages)
             context.final_content = final_content
             context.stop_reason = stop_reason

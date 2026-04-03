@@ -61,7 +61,13 @@ from nanobot.providers.speech import (
     OpenAISpeechProvider,
 )
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import ensure_dir, estimate_prompt_tokens_chain, safe_filename
+from nanobot.utils.helpers import (
+    ensure_dir,
+    estimate_prompt_tokens_chain,
+    image_placeholder_text,
+    safe_filename,
+    truncate_text as truncate_text_value,
+)
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ImageGenConfig, MemoryConfig
@@ -223,6 +229,7 @@ class AgentLoop:
     _CONTEXT_TOOL_RESULT_CHAR_STEPS = (16_000, 8_000, 4_000, 2_000, 1_000, 500, 200, 0)
     _CONTEXT_TOOL_RESULT_OMIT = "[tool result omitted to stay within context window]"
     _CONTEXT_TOOL_RESULT_SUFFIX = "\n... (truncated to stay within context window)"
+    _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 
     def __init__(
         self,
@@ -233,6 +240,10 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 40,
         context_window_tokens: int = 65_536,
+        context_block_limit: int | None = None,
+        max_tool_result_chars: int = _TOOL_RESULT_MAX_CHARS,
+        provider_retry_mode: str = "standard",
+        web_search_config: Any | None = None,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
         web_search_provider: str = "brave",
@@ -250,6 +261,23 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, ImageGenConfig, MemoryConfig
+        if web_search_config is not None:
+            brave_api_key = getattr(web_search_config, "api_key", brave_api_key) or None
+            web_search_provider = getattr(
+                web_search_config,
+                "provider",
+                web_search_provider,
+            )
+            web_search_base_url = getattr(
+                web_search_config,
+                "base_url",
+                web_search_base_url,
+            ) or None
+            web_search_max_results = getattr(
+                web_search_config,
+                "max_results",
+                web_search_max_results,
+            )
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -258,6 +286,9 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
+        self.context_block_limit = context_block_limit
+        self.max_tool_result_chars = max_tool_result_chars
+        self.provider_retry_mode = provider_retry_mode
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.web_search_provider = web_search_provider
@@ -288,6 +319,7 @@ class AgentLoop:
             provider=provider,
             workspace=workspace,
             bus=bus,
+            max_tool_result_chars=self.max_tool_result_chars,
             model=self.model,
             brave_api_key=brave_api_key,
             web_proxy=web_proxy,
@@ -660,6 +692,9 @@ class AgentLoop:
         self.model = defaults.model
         self.max_iterations = defaults.max_tool_iterations
         self.context_window_tokens = defaults.context_window_tokens
+        self.context_block_limit = defaults.context_block_limit
+        self.max_tool_result_chars = defaults.max_tool_result_chars
+        self.provider_retry_mode = defaults.provider_retry_mode
         self.exec_config = tools_cfg.exec
         self.image_gen_config = tools_cfg.image_gen
         self.memory_config = config.memory
@@ -684,6 +719,7 @@ class AgentLoop:
         self.subagents.apply_runtime_config(
             workspace=self.workspace,
             model=self.model,
+            max_tool_result_chars=self.max_tool_result_chars,
             brave_api_key=self.brave_api_key,
             web_proxy=self.web_proxy,
             web_search_provider=self.web_search_provider,
@@ -1756,7 +1792,7 @@ class AgentLoop:
             if block.get("type") == "text" and isinstance(block.get("text"), str):
                 text = block["text"]
                 if truncate_text and len(text) > self.max_tool_result_chars:
-                    text = truncate_text(text, self.max_tool_result_chars)
+                    text = truncate_text_value(text, self.max_tool_result_chars)
                 filtered.append({**block, "text": text})
                 continue
 
@@ -1889,7 +1925,7 @@ class AgentLoop:
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
-                    entry["content"] = truncate_text(content, self.max_tool_result_chars)
+                    entry["content"] = truncate_text_value(content, self.max_tool_result_chars)
                 elif isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(content, truncate_text=True)
                     if not filtered:

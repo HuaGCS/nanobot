@@ -215,7 +215,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
-        return [
+        messages = [
             {
                 "role": "system",
                 "content": self.build_system_prompt(

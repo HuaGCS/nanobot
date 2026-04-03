@@ -59,6 +59,7 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
+        self.max_tool_result_chars = max_tool_result_chars
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.web_search_provider = web_search_provider
@@ -75,6 +76,7 @@ class SubagentManager:
         *,
         workspace: Path,
         model: str,
+        max_tool_result_chars: int,
         brave_api_key: str | None,
         web_proxy: str | None,
         web_search_provider: str,
@@ -86,6 +88,7 @@ class SubagentManager:
         """Update runtime-configurable settings for future subagent tasks."""
         self.workspace = workspace
         self.model = model
+        self.max_tool_result_chars = max_tool_result_chars
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.web_search_provider = web_search_provider
@@ -145,12 +148,13 @@ class SubagentManager:
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                path_append=self.exec_config.path_append,
-            ))
+            if self.exec_config.enable:
+                tools.register(ExecTool(
+                    working_dir=str(self.workspace),
+                    timeout=self.exec_config.timeout,
+                    restrict_to_workspace=self.restrict_to_workspace,
+                    path_append=self.exec_config.path_append,
+                ))
             tools.register(
                 WebSearchTool(
                     provider=self.web_search_provider,
