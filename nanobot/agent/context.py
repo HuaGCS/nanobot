@@ -226,8 +226,14 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
                 ),
             },
             *history,
-            {"role": current_role, "content": merged},
         ]
+        if messages[-1].get("role") == current_role:
+            last = dict(messages[-1])
+            last["content"] = self._merge_message_content(last.get("content"), merged)
+            messages[-1] = last
+            return messages
+        messages.append({"role": current_role, "content": merged})
+        return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
