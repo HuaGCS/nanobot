@@ -24,10 +24,10 @@ from nanobot.config.schema import (
     SlackMultiConfig,
     TelegramConfig,
     TelegramMultiConfig,
-    WhatsAppConfig,
-    WhatsAppMultiConfig,
     WecomConfig,
     WecomMultiConfig,
+    WhatsAppConfig,
+    WhatsAppMultiConfig,
 )
 
 
@@ -430,7 +430,12 @@ def test_channel_manager_registers_mixed_single_and_multi_instance_channels(
     )
     config = Config.model_validate(
         {
+            "providers": {
+                "openai": {"apiKey": "sk-openai"},
+                "groq": {"apiKey": "gsk-groq"},
+            },
             "channels": {
+                "transcriptionProvider": "openai",
                 "whatsapp": {
                     "enabled": True,
                     "instances": [
@@ -522,6 +527,10 @@ def test_channel_manager_registers_mixed_single_and_multi_instance_channels(
     assert manager.get_channel("email/work").config.imap_host == "imap.work"
     assert manager.get_channel("matrix/ops").config.user_id == "@bot:example.com"
     assert manager.get_channel("mochat/sales").config.claw_token == "claw-token"
+    assert manager.get_channel("whatsapp/phone-a").transcription_provider == "openai"
+    assert manager.get_channel("whatsapp/phone-a").transcription_api_key == "sk-openai"
+    assert manager.get_channel("discord").transcription_provider == "openai"
+    assert manager.get_channel("discord").transcription_api_key == "sk-openai"
 
 
 def test_channel_manager_skips_empty_multi_instance_channel(

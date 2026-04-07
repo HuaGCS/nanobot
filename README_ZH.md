@@ -874,7 +874,8 @@ ollama run llama3.2
   "channels": {
     "sendProgress": true,
     "sendToolHints": false,
-    "sendMaxRetries": 3
+    "sendMaxRetries": 3,
+    "transcriptionProvider": "groq"
   }
 }
 ```
@@ -887,6 +888,9 @@ ollama run llama3.2
   是否把工具调用提示发到渠道
 - `sendMaxRetries`
   出站消息失败时的最大重试次数
+- `transcriptionProvider`
+  语音转写后端，可选 `groq`（默认）或 `openai`；API Key 会自动从对应的
+  `providers.groq` / `providers.openai` 读取，运行时重载配置后会直接更新到当前渠道实例
 
 ### MCP
 
@@ -1079,6 +1083,9 @@ HTTP 示例：
 如果你在 admin 页面里改了 `agents.defaults.workspace`，当前 gateway 实例会在保存后立即切换到
 新的 runtime workspace。只有表单里明确标注“需重启”的字段，才需要重启当前进程才能生效。
 `agents.defaults.providerPool` 也属于需重启项，因为它会改变 provider 路由策略。
+`agents.defaults.dream` 同样需要重启，因为它会改变 gateway 内置的 Dream 系统任务。
+Dream 配置放在 `agents.defaults.dream` 下，常规调度字段使用 `intervalH`；
+旧配置里的 `cron` 和 `model` 输入仍然兼容。
 
 ### Star Office UI 状态接口
 

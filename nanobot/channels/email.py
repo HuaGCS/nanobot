@@ -21,12 +21,9 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import EmailConfig, EmailInstanceConfig
-
-    # Attachment handling — set allowed types to enable (e.g. ["application/pdf", "image/*"], or ["*"] for all)
-    allowed_attachment_types: list[str] = Field(default_factory=list)
-    max_attachment_size: int = 2_000_000  # 2MB per attachment
-    max_attachments_per_email: int = 5
+from nanobot.utils.helpers import safe_filename
 
 
 class EmailChannel(BaseChannel):

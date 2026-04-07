@@ -13,7 +13,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel, NonRetriableSendError
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import ChannelsConfig
-from nanobot.utils.restart import RestartNotice
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -90,6 +89,12 @@ def test_channels_config_builtin_fields_and_defaults_are_available():
     assert cfg.telegram.enabled is False
     assert cfg.send_progress is True
     assert cfg.send_tool_hints is False
+    assert cfg.transcription_provider == "groq"
+
+
+def test_channels_config_accepts_transcription_provider_alias():
+    cfg = ChannelsConfig.model_validate({"transcriptionProvider": "openai"})
+    assert cfg.transcription_provider == "openai"
 
 
 # ---------------------------------------------------------------------------
@@ -223,9 +228,10 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
 
 
 def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     from nanobot.config.schema import Config
-    from typer.testing import CliRunner
 
     runner = CliRunner()
     seen: dict[str, object] = {}
@@ -252,9 +258,10 @@ def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
 
 
 def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     from nanobot.config.schema import Config
-    from typer.testing import CliRunner
 
     runner = CliRunner()
     seen: dict[str, object] = {}

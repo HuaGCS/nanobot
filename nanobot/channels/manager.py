@@ -87,7 +87,11 @@ class ChannelManager:
 
                         channel = self._instantiate_channel(cls, inst)
                         channel.name = channel_name
-                        channel.transcription_api_key = groq_key
+                        self._configure_transcription(
+                            channel,
+                            provider=transcription_provider,
+                            api_key=transcription_key,
+                        )
                         self.channels[channel_name] = channel
                         logger.info(
                             "{} channel instance enabled: {}",
@@ -98,13 +102,35 @@ class ChannelManager:
 
                 channel = self._instantiate_channel(cls, section)
                 channel.name = name
-                channel.transcription_api_key = groq_key
+                self._configure_transcription(
+                    channel,
+                    provider=transcription_provider,
+                    api_key=transcription_key,
+                )
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
 
         self._validate_allow_from()
+
+    def _configure_transcription(
+        self,
+        channel: BaseChannel,
+        *,
+        provider: str,
+        api_key: str,
+    ) -> None:
+        """Apply shared voice transcription settings to one channel instance."""
+        channel.transcription_provider = provider
+        channel.transcription_api_key = api_key
+
+    def _resolve_transcription_key(self, provider: str) -> str:
+        """Pick the API key for the configured transcription provider."""
+        providers = getattr(self.config, "providers", None)
+        if provider == "openai":
+            return getattr(getattr(providers, "openai", None), "api_key", "") or ""
+        return getattr(getattr(providers, "groq", None), "api_key", "") or ""
 
     def _instantiate_channel(self, cls: type[BaseChannel], section: Any) -> BaseChannel:
         """Instantiate a channel, passing optional supported kwargs when available."""
@@ -137,11 +163,18 @@ class ChannelManager:
         self.config = config
         workspace = config.workspace_path
         restrict = bool(getattr(config.tools, "restrict_to_workspace", False))
+        transcription_provider = config.channels.transcription_provider
+        transcription_key = self._resolve_transcription_key(transcription_provider)
         for channel in self.channels.values():
             if hasattr(channel, "_workspace"):
                 channel._workspace = Path(workspace).expanduser()
             if hasattr(channel, "_restrict_to_workspace"):
                 channel._restrict_to_workspace = restrict
+            self._configure_transcription(
+                channel,
+                provider=transcription_provider,
+                api_key=transcription_key,
+            )
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

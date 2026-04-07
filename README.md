@@ -1622,7 +1622,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
-| `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key is auto-resolved from the matching provider config. |
+| `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key is auto-resolved from the matching provider config, and runtime config reload updates the active channels in place. |
 
 #### Retry Behavior
 
@@ -1697,6 +1697,7 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 nanobot hot-reloads agent runtime config from the active `config.json` on the next message, including `tools.mcpServers`, `tools.web.*`, `tools.exec.*`, `tools.imageGen.*`, `tools.restrictToWorkspace`, `agents.defaults.workspace`, `agents.defaults.model`, `agents.defaults.maxToolIterations`, `agents.defaults.contextWindowTokens`, `agents.defaults.maxTokens`, `agents.defaults.temperature`, `agents.defaults.reasoningEffort`, `agents.defaults.timezone`, `channels.sendProgress`, `channels.sendToolHints`, `channels.sendMaxRetries`, and `channels.voiceReply.*`. Channel connection settings and provider credentials still require a restart.
 `agents.defaults.providerPool` also requires a restart because it changes provider routing.
+`agents.defaults.dream` also requires a restart because it changes the built-in Dream system job. Configure Dream under `agents.defaults.dream` with `intervalH` as the normal schedule field; legacy `cron` and `model` inputs are still accepted for compatibility.
 During long tool-using turns, nanobot now compacts older tool results on demand so the system prompt, long-term memory, and recent working context stay inside the active context window.
 When old conversation chunks are consolidated, nanobot now also keeps structured archive sidecars under `memory/archive/` so the agent can use `history_search` and `history_expand` to recall archived details after `/new`, persona switches, or long-token compaction.
 

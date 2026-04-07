@@ -222,6 +222,9 @@ class EmailConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
     verify_dkim: bool = True  # Require Authentication-Results with dkim=pass
     verify_spf: bool = True  # Require Authentication-Results with spf=pass
+    allowed_attachment_types: list[str] = Field(default_factory=list)
+    max_attachment_size: int = 2_000_000  # 2MB per attachment
+    max_attachments_per_email: int = 5
 
 
 class EmailInstanceConfig(EmailConfig):
@@ -446,6 +449,7 @@ class ChannelsConfig(Base):
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
+    transcription_provider: Literal["groq", "openai"] = "groq"
     voice_reply: VoiceReplyConfig = Field(default_factory=VoiceReplyConfig)
     whatsapp: WhatsAppConfig | WhatsAppMultiConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig | TelegramMultiConfig = Field(default_factory=TelegramConfig)
@@ -552,6 +556,33 @@ class ProviderPoolConfig(Base):
         return coerced
 
 
+class DreamConfig(Base):
+    """Dream memory consolidation configuration."""
+
+    _HOUR_MS = 3_600_000
+
+    interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
+    cron: str | None = Field(default=None, exclude=True)  # Legacy compatibility override
+    model_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("modelOverride", "model", "model_override"),
+    )  # Optional Dream-specific model override
+    max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
+    max_iterations: int = Field(default=10, ge=1)  # Max tool calls per Phase 2
+
+    def build_schedule(self, timezone: str) -> CronSchedule:
+        """Build the runtime schedule, preferring the legacy cron override if present."""
+        if self.cron:
+            return CronSchedule(kind="cron", expr=self.cron, tz=timezone)
+        return CronSchedule(kind="every", every_ms=self.interval_h * self._HOUR_MS)
+
+    def describe_schedule(self) -> str:
+        """Return a human-readable summary for logs and startup output."""
+        if self.cron:
+            return f"cron {self.cron} (legacy)"
+        return f"every {self.interval_h}h"
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -569,6 +600,7 @@ class AgentDefaults(Base):
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    dream: DreamConfig = Field(default_factory=DreamConfig)
     provider_pool: ProviderPoolConfig | None = Field(
         default=None,
         exclude_if=lambda value: value is None or not value.targets,

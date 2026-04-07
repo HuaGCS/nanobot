@@ -3,6 +3,7 @@ import json
 import re
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1342,6 +1343,124 @@ def test_gateway_constructs_http_server_without_public_file_options(monkeypatch,
     assert seen["star_office_tracker"] is not None
     assert seen["http_server_ctor"] is True
     assert "public_files_enabled" not in seen["agent_kwargs"]
+
+
+def test_gateway_registers_dream_job_from_config(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.dream.interval_h = 4
+    config.agents.defaults.dream.model_override = "openrouter/sonnet"
+    config.agents.defaults.dream.max_batch_size = 7
+    config.agents.defaults.dream.max_iterations = 11
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.resolve_config_env_vars", lambda c: c)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path, silent=False: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: MagicMock())
+
+    class _FakeCronService:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, job: CronJob) -> None:
+            seen["dream_job"] = job
+
+    class _FakeAgentLoop:
+        def __init__(self, **kwargs) -> None:
+            self.model = kwargs["model"]
+            self.tools = {}
+            self.dream = SimpleNamespace(
+                model=kwargs["model"],
+                max_batch_size=20,
+                max_iterations=10,
+            )
+            seen["agent"] = self
+
+        async def reload_runtime_config(self, _config) -> None:
+            return None
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        def __init__(self, _config, _bus) -> None:
+            self.enabled_channels = []
+
+        def apply_runtime_config(self, _config) -> None:
+            return None
+
+        async def start_all(self) -> None:
+            return None
+
+        async def stop_all(self) -> None:
+            return None
+
+    class _FakeHeartbeatService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def apply_runtime_config(self, **kwargs) -> None:
+            return None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeGatewayHttpServer:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def update_runtime_workspace(self, _workspace: Path) -> None:
+            return None
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    def _stop_asyncio_run(coro) -> None:
+        coro.close()
+        raise _StopGatewayError("stop")
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
+    monkeypatch.setattr("nanobot.gateway.http.GatewayHttpServer", _FakeGatewayHttpServer)
+    monkeypatch.setattr("nanobot.cli.commands.asyncio.run", _stop_asyncio_run)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    job = seen["dream_job"]
+    assert isinstance(job, CronJob)
+    assert job.id == "dream"
+    assert job.name == "dream"
+    assert job.schedule.kind == "every"
+    assert job.schedule.every_ms == 4 * 3_600_000
+    assert job.payload.kind == "system_event"
+    agent = seen["agent"]
+    assert agent.dream.model == "openrouter/sonnet"
+    assert agent.dream.max_batch_size == 7
+    assert agent.dream.max_iterations == 11
+    assert "Dream: every 4h" in result.stdout
+
 
 
 def test_serve_uses_api_config_defaults_and_workspace_override(
