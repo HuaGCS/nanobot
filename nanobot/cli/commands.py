@@ -702,6 +702,7 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.gateway.http import GatewayHttpServer
+    from nanobot.gateway.runtime_status import GatewayRuntimeStatusTracker, GatewayStatusHook
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
     from nanobot.star_office import StarOfficeHook, StarOfficePushSettings, StarOfficeStatusTracker
@@ -724,6 +725,7 @@ def gateway(
     star_office_tracker = StarOfficeStatusTracker(
         push_settings=StarOfficePushSettings.from_status_config(config.gateway.status)
     )
+    runtime_status_tracker = GatewayRuntimeStatusTracker(model=config.agents.defaults.model)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -756,8 +758,9 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
-        hooks=[StarOfficeHook(star_office_tracker)],
+        hooks=[StarOfficeHook(star_office_tracker), GatewayStatusHook(runtime_status_tracker)],
     )
+    runtime_status_tracker.set_model(agent.model)
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -832,6 +835,7 @@ def gateway(
         sync_workspace_templates(reloaded.workspace_path, silent=True)
         cron.rebind_store(reloaded.workspace_path / "cron" / "jobs.json")
         await agent.reload_runtime_config(reloaded)
+        runtime_status_tracker.set_model(agent.model)
         channels.apply_runtime_config(reloaded)
         star_office_tracker.apply_push_settings(StarOfficePushSettings.from_status_config(reloaded.gateway.status))
         await heartbeat.apply_runtime_config(
@@ -842,15 +846,6 @@ def gateway(
             timezone=reloaded.agents.defaults.timezone,
         )
         http_server.update_runtime_workspace(reloaded.workspace_path)
-
-    http_server = GatewayHttpServer(
-        config.gateway.host,
-        port,
-        config_path=runtime_config_path,
-        workspace=config.workspace_path,
-        reload_runtime=_reload_runtime_state,
-        star_office_tracker=star_office_tracker,
-    )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -910,6 +905,17 @@ def gateway(
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
         timezone=config.agents.defaults.timezone,
+    )
+
+    http_server = GatewayHttpServer(
+        config.gateway.host,
+        port,
+        config_path=runtime_config_path,
+        workspace=config.workspace_path,
+        reload_runtime=_reload_runtime_state,
+        star_office_tracker=star_office_tracker,
+        runtime_status_tracker=runtime_status_tracker,
+        heartbeat_service=heartbeat,
     )
 
     if channels.enabled_channels:

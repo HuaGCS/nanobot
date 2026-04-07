@@ -1317,6 +1317,8 @@ def test_gateway_constructs_http_server_without_public_file_options(monkeypatch,
             workspace: Path,
             reload_runtime,
             star_office_tracker,
+            runtime_status_tracker,
+            heartbeat_service,
         ) -> None:
             seen["host"] = host
             seen["port"] = port
@@ -1324,6 +1326,8 @@ def test_gateway_constructs_http_server_without_public_file_options(monkeypatch,
             seen["workspace"] = workspace
             seen["reload_runtime"] = reload_runtime
             seen["star_office_tracker"] = star_office_tracker
+            seen["runtime_status_tracker"] = runtime_status_tracker
+            seen["heartbeat_service"] = heartbeat_service
             seen["http_server_ctor"] = True
             raise _StopGatewayError("stop")
 
@@ -1341,6 +1345,8 @@ def test_gateway_constructs_http_server_without_public_file_options(monkeypatch,
     assert seen["workspace"] == config.workspace_path
     assert callable(seen["reload_runtime"])
     assert seen["star_office_tracker"] is not None
+    assert seen["runtime_status_tracker"] is not None
+    assert seen["heartbeat_service"] is not None
     assert seen["http_server_ctor"] is True
     assert "public_files_enabled" not in seen["agent_kwargs"]
 

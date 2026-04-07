@@ -1117,7 +1117,8 @@ nanobot 可以额外暴露一个很小的 HTTP 状态接口，方便接入
 - 路径是当前 gateway 进程下的 `GET /status`
 - `gateway.status.enabled=false` 时，`/status` 返回 `404`
 - 如果 `gateway.status.authKey` 非空，请在请求头里带上 `Authorization: Bearer <authKey>`
-- 返回 JSON 会包含 `state`、`detail`、`updatedAt`、`activeRuns` 等稳定字段
+- 脚本/API 请求会继续返回 JSON，包含 `state`、`detail`、`updatedAt`、`activeRuns` 等稳定字段
+- 浏览器访问时会渲染内置状态页，展示 nanobot 是否正常运行、连续运行时间、最近一次处理的任务，以及当前 heartbeat / 模型检测状态
 - nanobot 会根据 agent 生命周期自动刷新状态，当前会使用 `idle`、`researching`、`executing`、`syncing`、`writing`、`error` 这些状态值
 - `gateway.status.push.mode=guest` 会作为访客 Agent 调用 `join-agent` / `agent-push`，此时必须填写 `joinKey`
 - `gateway.status.push.mode=main` 会驱动内置主 Agent 的 `set_state`，此时不需要 `joinKey`

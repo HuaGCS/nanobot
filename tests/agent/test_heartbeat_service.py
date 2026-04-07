@@ -194,3 +194,36 @@ async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     user_msg = captured_messages[1]
     assert user_msg["role"] == "user"
     assert "Current Time:" in user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_tick_updates_status_snapshot_when_skipping(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check inbox", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "skip"},
+                )
+            ],
+        )
+    ])
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        enabled=True,
+    )
+
+    await service._tick()
+    snapshot = service.snapshot()
+
+    assert snapshot.model == "openai/gpt-4o-mini"
+    assert snapshot.last_status == "skipped"
+    assert "No active heartbeat tasks" in snapshot.last_detail
+    assert snapshot.last_checked_at_ms is not None

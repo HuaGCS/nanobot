@@ -1882,7 +1882,8 @@ Behavior:
 - The route is `GET /status` on the active gateway process
 - When `gateway.status.enabled` is `false`, `/status` returns `404`
 - When `gateway.status.authKey` is non-empty, send `Authorization: Bearer <authKey>`
-- The JSON payload includes stable dashboard fields such as `state`, `detail`, `updatedAt`, and `activeRuns`
+- Script/API requests keep returning JSON with stable dashboard fields such as `state`, `detail`, `updatedAt`, and `activeRuns`
+- Browser requests render a built-in status page showing whether nanobot is running normally, total uptime, the most recently processed task, and the current heartbeat/model check status
 - nanobot updates this status automatically from the agent lifecycle and uses states such as `idle`, `researching`, `executing`, `syncing`, `writing`, and `error`
 - `gateway.status.push.mode=guest` pushes as an invited agent by calling `join-agent` / `agent-push`, and requires `joinKey`
 - `gateway.status.push.mode=main` drives the built-in main office agent by calling `set_state`, and does not require `joinKey`

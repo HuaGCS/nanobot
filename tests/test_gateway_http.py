@@ -2,6 +2,7 @@ import json
 import re
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from aiohttp import web
@@ -12,6 +13,8 @@ import nanobot.gateway.admin as admin_mod
 from nanobot.config.loader import save_config
 from nanobot.config.schema import Config
 from nanobot.gateway.http import create_http_app
+from nanobot.gateway.runtime_status import GatewayRuntimeStatusTracker
+from nanobot.heartbeat.service import HeartbeatService
 
 
 def test_gateway_admin_config_parses_camel_case() -> None:
@@ -194,6 +197,61 @@ async def test_gateway_status_route_returns_tracker_snapshot_and_requires_auth(t
     assert payload["activeRuns"] == 1
     assert payload["updatedAt"]
     assert payload["updatedAtMs"] > 0
+
+
+@pytest.mark.asyncio
+async def test_gateway_status_route_renders_html_status_page_for_browser_requests(
+    tmp_path: Path,
+) -> None:
+    from nanobot.star_office import StarOfficeStatusTracker
+
+    config_path = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.gateway.status.enabled = True
+    save_config(config, config_path)
+
+    star_tracker = StarOfficeStatusTracker()
+    runtime_tracker = GatewayRuntimeStatusTracker(model="openrouter/sonnet")
+    runtime_tracker.note_task_started(7, "整理最近的待办任务")
+    runtime_tracker.note_task_finished(
+        7,
+        status="ok",
+        response_preview="已经整理出最新任务清单。",
+    )
+    heartbeat = HeartbeatService(
+        workspace=workspace,
+        provider=MagicMock(),
+        model="openrouter/sonnet",
+        interval_s=600,
+        enabled=True,
+    )
+    heartbeat._running = True
+    heartbeat._set_status("ok", "最近一次 heartbeat 检测成功", checked=True)
+
+    app = create_http_app(
+        config_path=config_path,
+        workspace=workspace,
+        star_office_tracker=star_tracker,
+        runtime_status_tracker=runtime_tracker,
+        heartbeat_service=heartbeat,
+    )
+
+    response = await _call_route(
+        app,
+        "GET",
+        "/status?format=html",
+        headers={"Accept": "text/html"},
+    )
+
+    assert response.status == 200
+    assert response.content_type == "text/html"
+    assert "运行状态页" in response.text
+    assert "正常运行" in response.text
+    assert "连续运行时间" in response.text
+    assert "整理最近的待办任务" in response.text
+    assert "openrouter/sonnet" in response.text
+    assert "最近一次成功" in response.text
 
 
 @pytest.mark.asyncio
