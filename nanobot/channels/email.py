@@ -12,6 +12,8 @@ from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import parseaddr
+from fnmatch import fnmatch
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -20,6 +22,11 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import EmailConfig, EmailInstanceConfig
+
+    # Attachment handling — set allowed types to enable (e.g. ["application/pdf", "image/*"], or ["*"] for all)
+    allowed_attachment_types: list[str] = Field(default_factory=list)
+    max_attachment_size: int = 2_000_000  # 2MB per attachment
+    max_attachments_per_email: int = 5
 
 
 class EmailChannel(BaseChannel):
@@ -127,6 +134,7 @@ class EmailChannel(BaseChannel):
                         sender_id=sender,
                         chat_id=sender,
                         content=item["content"],
+                        media=item.get("media") or None,
                         metadata=item.get("metadata", {}),
                     )
             except Exception as e:
@@ -394,6 +402,20 @@ class EmailChannel(BaseChannel):
                     f"{body}"
                 )
 
+                # --- Attachment extraction ---
+                attachment_paths: list[str] = []
+                if self.config.allowed_attachment_types:
+                    saved = self._extract_attachments(
+                        parsed,
+                        uid or "noid",
+                        allowed_types=self.config.allowed_attachment_types,
+                        max_size=self.config.max_attachment_size,
+                        max_count=self.config.max_attachments_per_email,
+                    )
+                    for p in saved:
+                        attachment_paths.append(str(p))
+                        content += f"\n[attachment: {p.name} — saved to {p}]"
+
                 metadata = {
                     "message_id": message_id,
                     "subject": subject,
@@ -408,6 +430,7 @@ class EmailChannel(BaseChannel):
                         "message_id": message_id,
                         "content": content,
                         "metadata": metadata,
+                        "media": attachment_paths,
                     }
                 )
 
@@ -526,6 +549,61 @@ class EmailChannel(BaseChannel):
             if re.search(r"\bdkim\s*=\s*pass\b", ar_lower):
                 dkim_pass = True
         return spf_pass, dkim_pass
+
+    @classmethod
+    def _extract_attachments(
+        cls,
+        msg: Any,
+        uid: str,
+        *,
+        allowed_types: list[str],
+        max_size: int,
+        max_count: int,
+    ) -> list[Path]:
+        """Extract and save email attachments to the media directory.
+
+        Returns list of saved file paths.
+        """
+        if not msg.is_multipart():
+            return []
+
+        saved: list[Path] = []
+        media_dir = get_media_dir("email")
+
+        for part in msg.walk():
+            if len(saved) >= max_count:
+                break
+            if part.get_content_disposition() != "attachment":
+                continue
+
+            content_type = part.get_content_type()
+            if not any(fnmatch(content_type, pat) for pat in allowed_types):
+                logger.debug("Email attachment skipped (type {}): not in allowed list", content_type)
+                continue
+
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                continue
+            if len(payload) > max_size:
+                logger.warning(
+                    "Email attachment skipped: size {} exceeds limit {}",
+                    len(payload),
+                    max_size,
+                )
+                continue
+
+            raw_name = part.get_filename() or "attachment"
+            sanitized = safe_filename(raw_name) or "attachment"
+            dest = media_dir / f"{uid}_{sanitized}"
+
+            try:
+                dest.write_bytes(payload)
+                saved.append(dest)
+                logger.info("Email attachment saved: {}", dest)
+            except Exception as exc:
+                logger.warning("Failed to save email attachment {}: {}", dest, exc)
+
+        return saved
 
     @staticmethod
     def _html_to_text(raw_html: str) -> str:

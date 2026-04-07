@@ -13,6 +13,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel, NonRetriableSendError
 from nanobot.config.schema import Config
+from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
@@ -40,7 +41,8 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_all
 
-        groq_key = self.config.providers.groq.api_key
+        transcription_provider = self.config.channels.transcription_provider
+        transcription_key = self._resolve_transcription_key(transcription_provider)
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -163,8 +165,27 @@ class ChannelManager:
             logger.info("Starting {} channel...", name)
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
+        self._notify_restart_done_if_needed()
+
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _notify_restart_done_if_needed(self) -> None:
+        """Send restart completion message when runtime env markers are present."""
+        notice = consume_restart_notice_from_env()
+        if not notice:
+            return
+        target = self.channels.get(notice.channel)
+        if not target:
+            return
+        asyncio.create_task(self._send_with_retry(
+            target,
+            OutboundMessage(
+                channel=notice.channel,
+                chat_id=notice.chat_id,
+                content=format_restart_completed_message(notice.started_at_raw),
+            ),
+        ))
 
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""

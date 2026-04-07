@@ -13,6 +13,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel, NonRetriableSendError
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import ChannelsConfig
+from nanobot.utils.restart import RestartNotice
 
 # ---------------------------------------------------------------------------
 # Helpers

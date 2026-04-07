@@ -14,7 +14,7 @@ always: true
 
 ## Search Past Events
 
-Choose the search method based on file size:
+`memory/history.jsonl` is JSONL format — each line is a JSON object with `cursor`, `timestamp`, `content`.
 
 - Preferred: use `history_search` first, then `history_expand` on a promising archive id
 - Small `memory/HISTORY.md`: use `read_file`, then search in-memory

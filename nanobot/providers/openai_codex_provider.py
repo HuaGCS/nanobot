@@ -120,6 +120,12 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
     }
 
 
+class _CodexHTTPError(RuntimeError):
+    def __init__(self, message: str, retry_after: float | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 async def _request_codex(
     url: str,
     headers: dict[str, str],
@@ -131,7 +137,11 @@ async def _request_codex(
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()
-                raise RuntimeError(_friendly_error(response.status_code, text.decode("utf-8", "ignore")))
+                retry_after = LLMProvider._extract_retry_after_from_headers(response.headers)
+                raise _CodexHTTPError(
+                    _friendly_error(response.status_code, text.decode("utf-8", "ignore")),
+                    retry_after=retry_after,
+                )
             return await consume_sse(response, on_content_delta)
 
 

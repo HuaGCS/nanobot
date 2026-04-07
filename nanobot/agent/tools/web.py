@@ -10,7 +10,8 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.utils.helpers import build_image_content_blocks
 
 # Shared constants
@@ -199,6 +200,18 @@ class WebSearchTool(Tool):
         return "\n".join(lines)
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        url=StringSchema("URL to fetch"),
+        extractMode={
+            "type": "string",
+            "enum": ["markdown", "text"],
+            "default": "markdown",
+        },
+        maxChars=IntegerSchema(0, minimum=100),
+        required=["url"],
+    )
+)
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
 

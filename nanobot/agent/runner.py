@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.utils.helpers import (
@@ -28,10 +29,6 @@ from nanobot.utils.runtime import (
     repeated_external_lookup_error,
 )
 
-_DEFAULT_MAX_ITERATIONS_MESSAGE = (
-    "I reached the maximum number of tool call iterations ({max_iterations}) "
-    "without completing the task. You can try breaking the task into smaller steps."
-)
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _SNIP_SAFETY_BUFFER = 1024
 @dataclass(slots=True)
@@ -256,8 +253,16 @@ class AgentRunner:
             break
         else:
             stop_reason = "max_iterations"
-            template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
-            final_content = template.format(max_iterations=spec.max_iterations)
+            if spec.max_iterations_message:
+                final_content = spec.max_iterations_message.format(
+                    max_iterations=spec.max_iterations,
+                )
+            else:
+                final_content = render_template(
+                    "agent/max_iterations_message.md",
+                    strip=True,
+                    max_iterations=spec.max_iterations,
+                )
             self._append_final_message(messages, final_content)
             context = AgentHookContext(iteration=spec.max_iterations, messages=messages)
             context.final_content = final_content
@@ -401,27 +406,8 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return lookup_error + _HINT, event, RuntimeError(lookup_error)
             return lookup_error + _HINT, event, None
-        prepare_call = getattr(spec.tools, "prepare_call", None)
-        tool, params, prep_error = None, tool_call.arguments, None
-        if callable(prepare_call):
-            try:
-                prepared = prepare_call(tool_call.name, tool_call.arguments)
-                if isinstance(prepared, tuple) and len(prepared) == 3:
-                    tool, params, prep_error = prepared
-            except Exception:
-                pass
-        if prep_error:
-            event = {
-                "name": tool_call.name,
-                "status": "error",
-                "detail": prep_error.split(": ", 1)[-1][:120],
-            }
-            return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
         try:
-            if tool is not None:
-                result = await tool.execute(**params)
-            else:
-                result = await spec.tools.execute(tool_call.name, params)
+            result = await spec.tools.execute(tool_call.name, tool_call.arguments)
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
@@ -484,6 +470,8 @@ class AgentRunner:
         result: Any,
     ) -> Any:
         result = ensure_nonempty_tool_result(tool_name, result)
+        if isinstance(result, str):
+            return result
         try:
             content = maybe_persist_tool_result(
                 spec.workspace,
@@ -608,4 +596,3 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
-

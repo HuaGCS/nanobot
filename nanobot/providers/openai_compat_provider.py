@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import os
 import secrets
 import string
@@ -12,7 +13,17 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import json_repair
-from openai import AsyncOpenAI
+
+if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+    from langfuse.openai import AsyncOpenAI
+else:
+    if os.environ.get("LANGFUSE_SECRET_KEY"):
+        import logging
+        logging.getLogger(__name__).warning(
+            "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+            "install with `pip install langfuse` to enable tracing"
+        )
+    from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -21,6 +32,7 @@ if TYPE_CHECKING:
 
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
+    "reasoning_content", "extra_content",
 })
 _ALNUM = string.ascii_letters + string.digits
 
@@ -135,6 +147,7 @@ class OpenAICompatProvider(LLMProvider):
             api_key=api_key or "no-key",
             base_url=effective_base,
             default_headers=default_headers,
+            max_retries=0,
         )
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
@@ -151,8 +164,9 @@ class OpenAICompatProvider(LLMProvider):
             resolved = env_val.replace("{api_key}", api_key).replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
 
-    @staticmethod
+    @classmethod
     def _apply_cache_control(
+        cls,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
@@ -180,7 +194,8 @@ class OpenAICompatProvider(LLMProvider):
         new_tools = tools
         if tools:
             new_tools = list(tools)
-            new_tools[-1] = {**new_tools[-1], "cache_control": cache_marker}
+            for idx in cls._tool_cache_marker_indices(new_tools):
+                new_tools[idx] = {**new_tools[idx], "cache_control": cache_marker}
         return new_messages, new_tools
 
     @staticmethod
@@ -221,6 +236,21 @@ class OpenAICompatProvider(LLMProvider):
     # Build kwargs
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _supports_temperature(
+        model_name: str,
+        reasoning_effort: str | None = None,
+    ) -> bool:
+        """Return True when the model accepts a temperature parameter.
+
+        GPT-5 family and reasoning models (o1/o3/o4) reject temperature
+        when reasoning_effort is set to anything other than ``"none"``.
+        """
+        if reasoning_effort and reasoning_effort.lower() != "none":
+            return False
+        name = model_name.lower()
+        return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
+
     def _build_kwargs(
         self,
         messages: list[dict[str, Any]],
@@ -245,8 +275,12 @@ class OpenAICompatProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
-            "temperature": temperature,
         }
+
+        # GPT-5 and reasoning models (o1/o3/o4) reject temperature when
+        # reasoning_effort is active.  Only include it when safe.
+        if self._supports_temperature(model_name, reasoning_effort):
+            kwargs["temperature"] = temperature
 
         if spec and getattr(spec, "supports_max_completion_tokens", False):
             kwargs["max_completion_tokens"] = max(1, max_tokens)
@@ -262,6 +296,24 @@ class OpenAICompatProvider(LLMProvider):
 
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
+
+        # Provider-specific thinking parameters.
+        # Only sent when reasoning_effort is explicitly configured so that
+        # the provider default is preserved otherwise.
+        if spec and reasoning_effort is not None:
+            thinking_enabled = reasoning_effort.lower() != "minimal"
+            extra: dict[str, Any] | None = None
+            if spec.name == "dashscope":
+                extra = {"enable_thinking": thinking_enabled}
+            elif spec.name in (
+                "volcengine", "volcengine_coding_plan",
+                "byteplus", "byteplus_coding_plan",
+            ):
+                extra = {
+                    "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
+                }
+            if extra:
+                kwargs.setdefault("extra_body", {}).update(extra)
 
         if tools:
             kwargs["tools"] = tools
@@ -385,9 +437,13 @@ class OpenAICompatProvider(LLMProvider):
                 content = self._extract_text_content(
                     response_map.get("content") or response_map.get("output_text")
                 )
+                reasoning_content = self._extract_text_content(
+                    response_map.get("reasoning_content")
+                )
                 if content is not None:
                     return LLMResponse(
                         content=content,
+                        reasoning_content=reasoning_content,
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
                     )
@@ -482,6 +538,7 @@ class OpenAICompatProvider(LLMProvider):
     @classmethod
     def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
         usage: dict[str, int] = {}
@@ -535,6 +592,9 @@ class OpenAICompatProvider(LLMProvider):
                 text = cls._extract_text_content(delta.get("content"))
                 if text:
                     content_parts.append(text)
+                text = cls._extract_text_content(delta.get("reasoning_content"))
+                if text:
+                    reasoning_parts.append(text)
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
                     _accum_tc(tc, idx)
                 usage = cls._extract_usage(chunk_map) or usage
@@ -549,6 +609,10 @@ class OpenAICompatProvider(LLMProvider):
             delta = choice.delta
             if delta and delta.content:
                 content_parts.append(delta.content)
+            if delta:
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    reasoning_parts.append(reasoning)
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
@@ -567,7 +631,56 @@ class OpenAICompatProvider(LLMProvider):
             ],
             finish_reason=finish_reason,
             usage=usage,
+            reasoning_content="".join(reasoning_parts) or None,
         )
+
+    @classmethod
+    def _extract_error_metadata(cls, e: Exception) -> dict[str, Any]:
+        response = getattr(e, "response", None)
+        headers = getattr(response, "headers", None)
+        payload = (
+            getattr(e, "body", None)
+            or getattr(e, "doc", None)
+            or getattr(response, "text", None)
+        )
+        if payload is None and response is not None:
+            response_json = getattr(response, "json", None)
+            if callable(response_json):
+                try:
+                    payload = response_json()
+                except Exception:
+                    payload = None
+        error_type, error_code = LLMProvider._extract_error_type_code(payload)
+
+        status_code = getattr(e, "status_code", None)
+        if status_code is None and response is not None:
+            status_code = getattr(response, "status_code", None)
+
+        should_retry: bool | None = None
+        if headers is not None:
+            raw = headers.get("x-should-retry")
+            if isinstance(raw, str):
+                lowered = raw.strip().lower()
+                if lowered == "true":
+                    should_retry = True
+                elif lowered == "false":
+                    should_retry = False
+
+        error_kind: str | None = None
+        error_name = e.__class__.__name__.lower()
+        if "timeout" in error_name:
+            error_kind = "timeout"
+        elif "connection" in error_name:
+            error_kind = "connection"
+
+        return {
+            "error_status_code": int(status_code) if status_code is not None else None,
+            "error_kind": error_kind,
+            "error_type": error_type,
+            "error_code": error_code,
+            "error_retry_after_s": cls._extract_retry_after_from_headers(headers),
+            "error_should_retry": should_retry,
+        }
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
@@ -639,6 +752,7 @@ class OpenAICompatProvider(LLMProvider):
                     f"{idle_timeout_s} seconds"
                 ),
                 finish_reason="error",
+                error_kind="timeout",
             )
         except Exception as e:
             return self._handle_error(e)

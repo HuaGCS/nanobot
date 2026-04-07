@@ -17,6 +17,7 @@ from nanobot.agent.personas import (
 )
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
+from nanobot.utils.prompt_templates import render_template
 
 
 class ContextBuilder:
@@ -36,6 +37,11 @@ class ContextBuilder:
         self.workspace = workspace
         self.timezone = timezone
         self.skills = SkillsLoader(workspace)
+
+    @property
+    def memory(self) -> MemoryStore:
+        """Backward-compatible default-persona memory store."""
+        return self._memory_store(DEFAULT_PERSONA)
 
     def list_personas(self) -> list[str]:
         """Return the personas available for this workspace."""
@@ -85,12 +91,7 @@ class ContextBuilder:
 
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
-            parts.append(f"""# Skills
-
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
-
-{skills_summary}""")
+            parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
         return "\n\n---\n\n".join(parts)
 
@@ -169,6 +170,23 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
+
+    @staticmethod
+    def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
+        if isinstance(left, str) and isinstance(right, str):
+            return f"{left}\n\n{right}" if left else right
+
+        def _to_blocks(value: Any) -> list[dict[str, Any]]:
+            if isinstance(value, list):
+                return [
+                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
+                    for item in value
+                ]
+            if value is None:
+                return []
+            return [{"type": "text", "text": str(value)}]
+
+        return _to_blocks(left) + _to_blocks(right)
 
     def _memory_store(self, persona: str) -> MemoryStore:
         """Return the memory store for the active persona."""

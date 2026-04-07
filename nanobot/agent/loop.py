@@ -29,7 +29,7 @@ from nanobot.agent.i18n import (
     resolve_language,
     text,
 )
-from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.memory_backends.file_backend import FileUserMemoryBackend
 from nanobot.agent.memory_models import MemoryCommitRequest, MemoryScope
 from nanobot.agent.memory_router import MemoryRouter
@@ -48,6 +48,7 @@ from nanobot.agent.tools.history import HistoryExpandTool, HistorySearchTool
 from nanobot.agent.tools.image_gen import ImageGenTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -226,7 +227,7 @@ class AgentLoop:
     _CLAWHUB_NPM_CACHE_DIR = Path(tempfile.gettempdir()) / "nanobot-npm-cache"
     _MEMORIX_CONTEXT_MAX_CHARS = 4_000
     _PREFLIGHT_CONSOLIDATION_BUDGET_SECONDS = 1.5
-    _CONTEXT_TOOL_RESULT_CHAR_STEPS = (16_000, 8_000, 4_000, 2_000, 1_000, 500, 200, 0)
+    _CONTEXT_TOOL_RESULT_CHAR_STEPS = (16_000, 8_000, 4_000, 2_000, 1_000, 500, 200)
     _CONTEXT_TOOL_RESULT_OMIT = "[tool result omitted to stay within context window]"
     _CONTEXT_TOOL_RESULT_SUFFIX = "\n... (truncated to stay within context window)"
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
@@ -350,8 +351,8 @@ class AgentLoop:
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
-        self.memory_consolidator = MemoryConsolidator(
-            workspace=workspace,
+        self.memory_consolidator = Consolidator(
+            store=self.context.memory,
             provider=provider,
             model=self.model,
             sessions=self.sessions,
@@ -359,6 +360,12 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+        )
+        self.consolidator = self.memory_consolidator
+        self.dream = Dream(
+            store=self.context.memory,
+            provider=provider,
+            model=self.model,
         )
         self._configure_memory_router()
         self._register_default_tools()
@@ -668,6 +675,16 @@ class AgentLoop:
         self.context.rebind_runtime(workspace=workspace, timezone=self.context.timezone)
         self.sessions.rebind_workspace(workspace)
         self.memory_consolidator.rebind_runtime(workspace=workspace, sessions=self.sessions)
+        self.memory_consolidator.store = self.context.memory
+        self.consolidator = self.memory_consolidator
+        self.dream = Dream(
+            store=self.context.memory,
+            provider=self.provider,
+            model=self.model,
+            max_batch_size=self.dream.max_batch_size,
+            max_iterations=self.dream.max_iterations,
+            max_tool_result_chars=self.dream.max_tool_result_chars,
+        )
 
     def _configure_memory_router(self) -> None:
         """Build the current memory router from runtime config."""
@@ -719,7 +736,6 @@ class AgentLoop:
         self.subagents.apply_runtime_config(
             workspace=self.workspace,
             model=self.model,
-            max_tool_result_chars=self.max_tool_result_chars,
             brave_api_key=self.brave_api_key,
             web_proxy=self.web_proxy,
             web_search_provider=self.web_search_provider,
@@ -911,16 +927,19 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+        for cls in (GlobTool, GrepTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         if self.exec_config.enable:
             self.tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
+                sandbox=self.exec_config.sandbox,
                 path_append=self.exec_config.path_append,
             ))
         self.tools.register(
@@ -1801,14 +1820,8 @@ class AgentLoop:
         return filtered
 
     def _prompt_budget_tokens(self) -> int:
-        """Return the safe prompt-token budget after reserving completion headroom."""
-        max_completion = getattr(
-            getattr(self, "memory_consolidator", None),
-            "max_completion_tokens",
-            getattr(getattr(self.provider, "generation", None), "max_tokens", 4096),
-        )
-        safety = getattr(getattr(self, "memory_consolidator", None), "_SAFETY_BUFFER", 1024)
-        return max(0, int(self.context_window_tokens) - int(max_completion) - int(safety))
+        """Return the current-turn prompt budget used for tool-result compaction."""
+        return max(0, int(self.context_window_tokens))
 
     def _truncate_prompt_text(self, text: str, max_chars: int) -> str:
         """Trim text for in-flight prompt compaction."""

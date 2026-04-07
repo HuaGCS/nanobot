@@ -1,10 +1,11 @@
-"""Memory system for persistent agent memory."""
+"""Memory system: pure file I/O store, lightweight Consolidator, and Dream processor."""
 
 from __future__ import annotations
 
 import asyncio
 import contextvars
 import json
+import re
 import weakref
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +16,16 @@ from loguru import logger
 from nanobot.agent.history_archive import HistoryArchiveStore
 from nanobot.agent.i18n import DEFAULT_LANGUAGE, resolve_language
 from nanobot.agent.personas import DEFAULT_PERSONA, persona_workspace, resolve_persona_name
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
+from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.utils.gitstore import GitStore
+from nanobot.utils.helpers import (
+    ensure_dir,
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
+    strip_think,
+)
+from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -62,6 +72,7 @@ def _normalize_save_memory_args(args: Any) -> dict[str, Any] | None:
         return args[0] if args and isinstance(args[0], dict) else None
     return args if isinstance(args, dict) else None
 
+
 _TOOL_CHOICE_ERROR_MARKERS = (
     "tool_choice",
     "toolchoice",
@@ -73,36 +84,318 @@ _TOOL_CHOICE_ERROR_MARKERS = (
 def _is_tool_choice_unsupported(content: str | None) -> bool:
     """Detect provider errors caused by forced tool_choice being unsupported."""
     text = (content or "").lower()
-    return any(m in text for m in _TOOL_CHOICE_ERROR_MARKERS)
+    return any(marker in text for marker in _TOOL_CHOICE_ERROR_MARKERS)
 
+
+# ---------------------------------------------------------------------------
+# MemoryStore — pure file I/O layer
+# ---------------------------------------------------------------------------
 
 
 class MemoryStore:
-    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
+    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
 
+    _DEFAULT_MAX_HISTORY = 1000
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
+    _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
+    _LEGACY_TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\s*")
+    _LEGACY_RAW_MESSAGE_RE = re.compile(
+        r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s+[A-Z][A-Z0-9_]*(?:\s+\[tools:\s*[^\]]+\])?:"
+    )
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
+        self.workspace = workspace
+        self.max_history_entries = max_history_entries
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
-        self.history_file = self.memory_dir / "HISTORY.md"
+        self.history_file = self.memory_dir / "history.jsonl"
+        self.legacy_history_file = self.memory_dir / "HISTORY.md"
+        self.soul_file = workspace / "SOUL.md"
+        self.user_file = workspace / "USER.md"
+        self._cursor_file = self.memory_dir / ".cursor"
+        self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._consecutive_failures = 0
+        self._git = GitStore(workspace, tracked_files=[
+            "SOUL.md", "USER.md", "memory/MEMORY.md",
+        ])
+        self._maybe_migrate_legacy_history()
 
-    def read_long_term(self) -> str:
-        if self.memory_file.exists():
-            return self.memory_file.read_text(encoding="utf-8")
-        return ""
+    @property
+    def git(self) -> GitStore:
+        return self._git
 
-    def write_long_term(self, content: str) -> None:
+    # -- generic helpers -----------------------------------------------------
+
+    @staticmethod
+    def read_file(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return ""
+
+    def _maybe_migrate_legacy_history(self) -> None:
+        """One-time upgrade from legacy HISTORY.md to history.jsonl.
+
+        The migration is best-effort and prioritizes preserving as much content
+        as possible over perfect parsing.
+        """
+        if not self.legacy_history_file.exists():
+            return
+        if self.history_file.exists() and self.history_file.stat().st_size > 0:
+            return
+
+        try:
+            legacy_text = self.legacy_history_file.read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError:
+            logger.exception("Failed to read legacy HISTORY.md for migration")
+            return
+
+        entries = self._parse_legacy_history(legacy_text)
+        try:
+            if entries:
+                self._write_entries(entries)
+                last_cursor = entries[-1]["cursor"]
+                self._cursor_file.write_text(str(last_cursor), encoding="utf-8")
+                # Default to "already processed" so upgrades do not replay the
+                # user's entire historical archive into Dream on first start.
+                self._dream_cursor_file.write_text(str(last_cursor), encoding="utf-8")
+
+            backup_path = self._next_legacy_backup_path()
+            self.legacy_history_file.replace(backup_path)
+            logger.info(
+                "Migrated legacy HISTORY.md to history.jsonl ({} entries)",
+                len(entries),
+            )
+        except Exception:
+            logger.exception("Failed to migrate legacy HISTORY.md")
+
+    def _parse_legacy_history(self, text: str) -> list[dict[str, Any]]:
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not normalized:
+            return []
+
+        fallback_timestamp = self._legacy_fallback_timestamp()
+        entries: list[dict[str, Any]] = []
+        chunks = self._split_legacy_history_chunks(normalized)
+
+        for cursor, chunk in enumerate(chunks, start=1):
+            timestamp = fallback_timestamp
+            content = chunk
+            match = self._LEGACY_TIMESTAMP_RE.match(chunk)
+            if match:
+                timestamp = match.group(1)
+                remainder = chunk[match.end():].lstrip()
+                if remainder:
+                    content = remainder
+
+            entries.append({
+                "cursor": cursor,
+                "timestamp": timestamp,
+                "content": content,
+            })
+        return entries
+
+    def _split_legacy_history_chunks(self, text: str) -> list[str]:
+        lines = text.split("\n")
+        chunks: list[str] = []
+        current: list[str] = []
+        saw_blank_separator = False
+
+        for line in lines:
+            if saw_blank_separator and line.strip() and current:
+                chunks.append("\n".join(current).strip())
+                current = [line]
+                saw_blank_separator = False
+                continue
+            if self._should_start_new_legacy_chunk(line, current):
+                chunks.append("\n".join(current).strip())
+                current = [line]
+                saw_blank_separator = False
+                continue
+            current.append(line)
+            saw_blank_separator = not line.strip()
+
+        if current:
+            chunks.append("\n".join(current).strip())
+        return [chunk for chunk in chunks if chunk]
+
+    def _should_start_new_legacy_chunk(self, line: str, current: list[str]) -> bool:
+        if not current:
+            return False
+        if not self._LEGACY_ENTRY_START_RE.match(line):
+            return False
+        if self._is_raw_legacy_chunk(current) and self._LEGACY_RAW_MESSAGE_RE.match(line):
+            return False
+        return True
+
+    def _is_raw_legacy_chunk(self, lines: list[str]) -> bool:
+        first_nonempty = next((line for line in lines if line.strip()), "")
+        match = self._LEGACY_TIMESTAMP_RE.match(first_nonempty)
+        if not match:
+            return False
+        return first_nonempty[match.end():].lstrip().startswith("[RAW]")
+
+    def _legacy_fallback_timestamp(self) -> str:
+        try:
+            return datetime.fromtimestamp(
+                self.legacy_history_file.stat().st_mtime,
+            ).strftime("%Y-%m-%d %H:%M")
+        except OSError:
+            return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    def _next_legacy_backup_path(self) -> Path:
+        candidate = self.memory_dir / "HISTORY.md.bak"
+        suffix = 2
+        while candidate.exists():
+            candidate = self.memory_dir / f"HISTORY.md.bak.{suffix}"
+            suffix += 1
+        return candidate
+
+    # -- MEMORY.md (long-term facts) -----------------------------------------
+
+    def read_memory(self) -> str:
+        return self.read_file(self.memory_file)
+
+    def write_memory(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
 
-    def append_history(self, entry: str) -> None:
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(entry.rstrip() + "\n\n")
+    def read_long_term(self) -> str:
+        """Backward-compatible alias for older callers."""
+        return self.read_memory()
+
+    def write_long_term(self, content: str) -> None:
+        """Backward-compatible alias for older callers."""
+        self.write_memory(content)
+
+    # -- SOUL.md -------------------------------------------------------------
+
+    def read_soul(self) -> str:
+        return self.read_file(self.soul_file)
+
+    def write_soul(self, content: str) -> None:
+        self.soul_file.write_text(content, encoding="utf-8")
+
+    # -- USER.md -------------------------------------------------------------
+
+    def read_user(self) -> str:
+        return self.read_file(self.user_file)
+
+    def write_user(self, content: str) -> None:
+        self.user_file.write_text(content, encoding="utf-8")
+
+    # -- context injection (used by context.py) ------------------------------
 
     def get_memory_context(self) -> str:
-        long_term = self.read_long_term()
+        long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
+
+    # -- history.jsonl — append-only, JSONL format ---------------------------
+
+    def append_history(self, entry: str) -> int:
+        """Append *entry* to history.jsonl and return its auto-incrementing cursor."""
+        cursor = self._next_cursor()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        content = strip_think(entry.rstrip()) or entry.rstrip()
+        record = {"cursor": cursor, "timestamp": ts, "content": content}
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                if key not in {"cursor", "timestamp", "content"}:
+                    record[key] = value
+        with open(self.history_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._cursor_file.write_text(str(cursor), encoding="utf-8")
+        return cursor
+
+    def _next_cursor(self) -> int:
+        """Read the current cursor counter and return next value."""
+        if self._cursor_file.exists():
+            try:
+                return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
+            except (ValueError, OSError):
+                pass
+        # Fallback: read last line's cursor from the JSONL file.
+        last = self._read_last_entry()
+        if last:
+            return last["cursor"] + 1
+        return 1
+
+    def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
+        """Return history entries with cursor > *since_cursor*."""
+        return [e for e in self._read_entries() if e["cursor"] > since_cursor]
+
+    def compact_history(self) -> None:
+        """Drop oldest entries if the file exceeds *max_history_entries*."""
+        if self.max_history_entries <= 0:
+            return
+        entries = self._read_entries()
+        if len(entries) <= self.max_history_entries:
+            return
+        kept = entries[-self.max_history_entries:]
+        self._write_entries(kept)
+
+    # -- JSONL helpers -------------------------------------------------------
+
+    def _read_entries(self) -> list[dict[str, Any]]:
+        """Read all entries from history.jsonl."""
+        entries: list[dict[str, Any]] = []
+        try:
+            with open(self.history_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+        except FileNotFoundError:
+            pass
+        return entries
+
+    def _read_last_entry(self) -> dict[str, Any] | None:
+        """Read the last entry from the JSONL file efficiently."""
+        try:
+            with open(self.history_file, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                if size == 0:
+                    return None
+                read_size = min(size, 4096)
+                f.seek(size - read_size)
+                data = f.read().decode("utf-8")
+                lines = [l for l in data.split("\n") if l.strip()]
+                if not lines:
+                    return None
+                return json.loads(lines[-1])
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+    def _write_entries(self, entries: list[dict[str, Any]]) -> None:
+        """Overwrite history.jsonl with the given entries."""
+        with open(self.history_file, "w", encoding="utf-8") as f:
+            for entry in entries:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    # -- dream cursor --------------------------------------------------------
+
+    def get_last_dream_cursor(self) -> int:
+        if self._dream_cursor_file.exists():
+            try:
+                return int(self._dream_cursor_file.read_text(encoding="utf-8").strip())
+            except (ValueError, OSError):
+                pass
+        return 0
+
+    def set_last_dream_cursor(self, cursor: int) -> None:
+        self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
+
+    # -- message formatting utility ------------------------------------------
 
     @staticmethod
     def _format_messages(messages: list[dict]) -> str:
@@ -258,9 +551,19 @@ class MemoryStore:
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
         )
 
+    def raw_archive(self, messages: list[dict]) -> None:
+        """Backward-compatible raw archive entry point."""
+        self._raw_archive(messages)
 
-class MemoryConsolidator:
-    """Owns consolidation policy, locking, and session offset updates."""
+
+
+# ---------------------------------------------------------------------------
+# Consolidator — lightweight token-budget triggered consolidation
+# ---------------------------------------------------------------------------
+
+
+class Consolidator:
+    """Lightweight consolidation: summarizes evicted messages into history.jsonl."""
 
     _MAX_CONSOLIDATION_ROUNDS = 5
 
@@ -268,7 +571,7 @@ class MemoryConsolidator:
 
     def __init__(
         self,
-        workspace: Path,
+        store: MemoryStore,
         provider: LLMProvider,
         model: str,
         sessions: SessionManager,
@@ -277,7 +580,8 @@ class MemoryConsolidator:
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         max_completion_tokens: int = 4096,
     ):
-        self.workspace = workspace
+        self.store = store
+        self.workspace = store.workspace
         self.provider = provider
         self.model = model
         self.sessions = sessions
@@ -414,18 +718,34 @@ class MemoryConsolidator:
     ) -> bool:
         """Archive messages with guaranteed persistence (retries until raw-dump fallback)."""
         if not messages:
-            return True
+            return False
         token = self._active_session.set(session)
         cb_token = self._archive_callbacks.set(
             self._make_archive_callback(session, messages, source=source)
         )
         try:
-            for _ in range(self._get_store(session)._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
-                if await self.consolidate_messages(messages):
-                    return True
+            return await self.archive(messages)
         finally:
             self._archive_callbacks.reset(cb_token)
             self._active_session.reset(token)
+
+    async def archive(self, messages: list[dict[str, object]]) -> bool:
+        """Backward-compatible archive entry point used by older tests and commands."""
+        if not messages:
+            return False
+
+        session = self._active_session.get()
+        if session is None:
+            store = self._get_default_store()
+            for _ in range(store._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
+                if await store.consolidate(messages, self.provider, self.model):
+                    return True
+            return True
+
+        store = self._get_store(session)
+        for _ in range(store._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
+            if await self.consolidate_messages(messages):
+                return True
         return True
 
     async def archive_messages(
@@ -512,7 +832,7 @@ class MemoryConsolidator:
                     self._make_archive_callback(session, chunk, source="token_consolidation")
                 )
                 try:
-                    if not await self.consolidate_messages(chunk):
+                    if not await self.archive(chunk):
                         return
                 finally:
                     self._archive_callbacks.reset(cb_token)
@@ -523,3 +843,166 @@ class MemoryConsolidator:
                 estimated, source = self.estimate_session_prompt_tokens(session)
                 if estimated <= 0:
                     return
+
+
+MemoryConsolidator = Consolidator
+
+
+# ---------------------------------------------------------------------------
+# Dream — heavyweight cron-scheduled memory consolidation
+# ---------------------------------------------------------------------------
+
+
+class Dream:
+    """Two-phase memory processor: analyze history.jsonl, then edit files via AgentRunner.
+
+    Phase 1 produces an analysis summary (plain LLM call).
+    Phase 2 delegates to AgentRunner with read_file / edit_file tools so the
+    LLM can make targeted, incremental edits instead of replacing entire files.
+    """
+
+    def __init__(
+        self,
+        store: MemoryStore,
+        provider: LLMProvider,
+        model: str,
+        max_batch_size: int = 20,
+        max_iterations: int = 10,
+        max_tool_result_chars: int = 16_000,
+    ):
+        self.store = store
+        self.provider = provider
+        self.model = model
+        self.max_batch_size = max_batch_size
+        self.max_iterations = max_iterations
+        self.max_tool_result_chars = max_tool_result_chars
+        self._runner = AgentRunner(provider)
+        self._tools = self._build_tools()
+
+    # -- tool registry -------------------------------------------------------
+
+    def _build_tools(self) -> ToolRegistry:
+        """Build a minimal tool registry for the Dream agent."""
+        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
+
+        tools = ToolRegistry()
+        workspace = self.store.workspace
+        tools.register(ReadFileTool(workspace=workspace, allowed_dir=workspace))
+        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
+        return tools
+
+    # -- main entry ----------------------------------------------------------
+
+    async def run(self) -> bool:
+        """Process unprocessed history entries. Returns True if work was done."""
+        last_cursor = self.store.get_last_dream_cursor()
+        entries = self.store.read_unprocessed_history(since_cursor=last_cursor)
+        if not entries:
+            return False
+
+        batch = entries[: self.max_batch_size]
+        logger.info(
+            "Dream: processing {} entries (cursor {}→{}), batch={}",
+            len(entries), last_cursor, batch[-1]["cursor"], len(batch),
+        )
+
+        # Build history text for LLM
+        history_text = "\n".join(
+            f"[{e['timestamp']}] {e['content']}" for e in batch
+        )
+
+        # Current file contents
+        current_memory = self.store.read_memory() or "(empty)"
+        current_soul = self.store.read_soul() or "(empty)"
+        current_user = self.store.read_user() or "(empty)"
+        file_context = (
+            f"## Current MEMORY.md\n{current_memory}\n\n"
+            f"## Current SOUL.md\n{current_soul}\n\n"
+            f"## Current USER.md\n{current_user}"
+        )
+
+        # Phase 1: Analyze
+        phase1_prompt = (
+            f"## Conversation History\n{history_text}\n\n{file_context}"
+        )
+
+        try:
+            phase1_response = await self.provider.chat_with_retry(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": render_template("agent/dream_phase1.md", strip=True),
+                    },
+                    {"role": "user", "content": phase1_prompt},
+                ],
+                tools=None,
+                tool_choice=None,
+            )
+            analysis = phase1_response.content or ""
+            logger.debug("Dream Phase 1 complete ({} chars)", len(analysis))
+        except Exception:
+            logger.exception("Dream Phase 1 failed")
+            return False
+
+        # Phase 2: Delegate to AgentRunner with read_file / edit_file
+        phase2_prompt = f"## Analysis Result\n{analysis}\n\n{file_context}"
+
+        tools = self._tools
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": render_template("agent/dream_phase2.md", strip=True),
+            },
+            {"role": "user", "content": phase2_prompt},
+        ]
+
+        try:
+            result = await self._runner.run(AgentRunSpec(
+                initial_messages=messages,
+                tools=tools,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                max_tool_result_chars=self.max_tool_result_chars,
+                fail_on_tool_error=False,
+            ))
+            logger.debug(
+                "Dream Phase 2 complete: stop_reason={}, tool_events={}",
+                result.stop_reason, len(result.tool_events),
+            )
+        except Exception:
+            logger.exception("Dream Phase 2 failed")
+            result = None
+
+        # Build changelog from tool events
+        changelog: list[str] = []
+        if result and result.tool_events:
+            for event in result.tool_events:
+                if event["status"] == "ok":
+                    changelog.append(f"{event['name']}: {event['detail']}")
+
+        # Advance cursor — always, to avoid re-processing Phase 1
+        new_cursor = batch[-1]["cursor"]
+        self.store.set_last_dream_cursor(new_cursor)
+        self.store.compact_history()
+
+        if result and result.stop_reason == "completed":
+            logger.info(
+                "Dream done: {} change(s), cursor advanced to {}",
+                len(changelog), new_cursor,
+            )
+        else:
+            reason = result.stop_reason if result else "exception"
+            logger.warning(
+                "Dream incomplete ({}): cursor advanced to {}",
+                reason, new_cursor,
+            )
+
+        # Git auto-commit (only when there are actual changes)
+        if changelog and self.store.git.is_initialized():
+            ts = batch[-1]["timestamp"]
+            sha = self.store.git.auto_commit(f"dream: {ts}, {len(changelog)} change(s)")
+            if sha:
+                logger.info("Dream commit: {}", sha)
+
+        return True
