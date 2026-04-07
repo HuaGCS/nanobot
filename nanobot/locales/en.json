@@ -18,6 +18,9 @@
     "cmd_restart": "/restart — Restart the bot",
     "cmd_help": "/help — Show available commands",
     "cmd_status": "/status — Show bot status",
+    "cmd_dream": "/dream — Manually trigger Dream consolidation",
+    "cmd_dream_log": "/dream-log — Show what the last Dream changed",
+    "cmd_dream_restore": "/dream-restore — Revert memory to a previous state",
     "skill_usage": "Usage:\n/skill search <query>\n/skill install <slug>\n/skill uninstall <slug>\n/skill list\n/skill update",
     "skill_search_missing_query": "Missing query.\n\nUsage:\n/skill search <query>",
     "skill_search_no_results": "No skills found for \"{query}\". Try broader keywords, or use /skill install <slug> if you know the exact slug.",
@@ -609,6 +612,9 @@
     "stop": "Stop the current task",
     "help": "Show command help",
     "restart": "Restart the bot",
-    "status": "Show bot status"
+    "status": "Show bot status",
+    "dream": "Run Dream consolidation now",
+    "dream_log": "Show the latest Dream change",
+    "dream_restore": "Restore an earlier Dream version"
   }
 }

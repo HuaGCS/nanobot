@@ -12,7 +12,7 @@ from typing import Any
 from loguru import logger
 from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.agent.i18n import (
@@ -24,7 +24,6 @@ from nanobot.agent.i18n import (
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import TelegramConfig, TelegramInstanceConfig
 from nanobot.security.network import validate_url_target
@@ -191,7 +190,21 @@ class TelegramChannel(BaseChannel):
     name = "telegram"
     display_name = "Telegram"
 
-    COMMAND_NAMES = ("start", "new", "lang", "persona", "skill", "mcp", "stop", "restart", "status", "help")
+    COMMAND_NAMES = (
+        "start",
+        "new",
+        "lang",
+        "persona",
+        "skill",
+        "mcp",
+        "stop",
+        "restart",
+        "status",
+        "dream",
+        "dream_log",
+        "dream_restore",
+        "help",
+    )
 
     @classmethod
     def default_config(cls) -> dict[str, object]:
@@ -232,6 +245,17 @@ class TelegramChannel(BaseChannel):
             return False
 
         return sid in allow_list or username in allow_list
+
+    @staticmethod
+    def _normalize_telegram_command(content: str) -> str:
+        """Map Telegram-safe command aliases back to canonical nanobot commands."""
+        if not content.startswith("/"):
+            return content
+        if content == "/dream_log" or content.startswith("/dream_log "):
+            return content.replace("/dream_log", "/dream-log", 1)
+        if content == "/dream_restore" or content.startswith("/dream_restore "):
+            return content.replace("/dream_restore", "/dream-restore", 1)
+        return content
 
     @classmethod
     def _build_bot_commands(cls, language: str) -> list[BotCommand]:
@@ -288,6 +312,9 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("status", self._forward_command))
+        self._app.add_handler(CommandHandler("dream", self._forward_command))
+        self._app.add_handler(CommandHandler("dream_log", self._forward_command))
+        self._app.add_handler(CommandHandler("dream_restore", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
@@ -455,7 +482,7 @@ class TelegramChannel(BaseChannel):
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
         from telegram.error import RetryAfter
-        
+
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -662,13 +689,13 @@ class TelegramChannel(BaseChannel):
         text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
         if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
             text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
-            
+
         if not text:
             return None
-            
+
         bot_id, _ = await self._ensure_bot_identity()
         reply_user = getattr(reply, "from_user", None)
-        
+
         if bot_id and reply_user and getattr(reply_user, "id", None) == bot_id:
             return f"[Reply to bot: {text}]"
         elif reply_user and getattr(reply_user, "username", None):
@@ -812,7 +839,7 @@ class TelegramChannel(BaseChannel):
         message = update.message
         user = update.effective_user
         self._remember_thread_context(message)
-        
+
         # Strip @bot_username suffix if present
         content = message.text or ""
         if content.startswith("/") and "@" in content:
@@ -820,7 +847,7 @@ class TelegramChannel(BaseChannel):
             cmd_part = cmd_part.split("@")[0]
             content = f"{cmd_part} {rest[0]}" if rest else cmd_part
         content = self._normalize_telegram_command(content)
-            
+
         await self._handle_message(
             sender_id=self._sender_id(user),
             chat_id=str(message.chat_id),
