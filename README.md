@@ -2103,6 +2103,11 @@ time.
 - `Dream` runs on a schedule and can also be triggered manually
 - memory changes can be inspected and restored with built-in commands
 
+`USER.md` remains the persona-to-user relationship layer. Use optional `PROFILE.md` for stable user
+facts and preferences, and optional `INSIGHTS.md` for validated collaboration heuristics. When a
+remembered detail is tentative, prefer one canonical bullet with `(verify)` instead of keeping
+competing versions.
+
 If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
 
 ## 💻 CLI Reference
@@ -2169,7 +2174,10 @@ Persona workspaces can also include optional `STYLE.md` and `LORE.md`. When pres
 them into the persona system prompt after `SOUL.md` and `USER.md`. They can also include optional
 `PROFILE.md`, which is loaded as a separate user-profile layer for stable user facts and
 preferences instead of persona identity, plus optional `INSIGHTS.md`, which stores learned
-collaboration guidance such as proven workflows, strategy notes, and recurring pitfalls.
+collaboration guidance such as proven workflows, strategy notes, and recurring pitfalls. `USER.md`
+should stay focused on relationship framing; conflicting profile/insight bullets should be
+replaced rather than accumulated. These optional overlays are not seeded into a fresh workspace by
+default; create them when you actually need them.
 
 Import a SillyTavern preset into an existing persona:
 

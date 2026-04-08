@@ -6,6 +6,7 @@ import pytest
 
 from nanobot.agent.memory import Dream, MemoryStore
 from nanobot.agent.runner import AgentRunResult
+from nanobot.utils.prompt_templates import render_template
 
 
 @pytest.fixture
@@ -55,6 +56,15 @@ def _make_run_result(
 
 
 class TestDreamRun:
+    def test_prompt_templates_include_conflict_and_verify_guidance(self):
+        phase1 = render_template("agent/dream_phase1.md", strip=True)
+        phase2 = render_template("agent/dream_phase2.md", strip=True)
+
+        assert 'mark it with "(verify)"' in phase1
+        assert "replace the old bullet instead of keeping both versions" in phase1
+        assert "Resolve contradictions by editing or deleting older bullets" in phase2
+        assert 'mark it once with "(verify)"' in phase2
+
     def test_registers_write_file_for_optional_layer_creation(self, dream):
         assert dream._tools.get("write_file") is not None
 

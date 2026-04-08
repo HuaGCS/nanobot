@@ -117,9 +117,13 @@ class MemoryStore:
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._consecutive_failures = 0
-        self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "PROFILE.md", "INSIGHTS.md", "memory/MEMORY.md",
-        ])
+        self._git = GitStore(
+            workspace,
+            tracked_files=[
+                "SOUL.md", "USER.md", "PROFILE.md", "INSIGHTS.md", "memory/MEMORY.md",
+            ],
+            seed_missing_files=False,
+        )
         self._maybe_migrate_legacy_history()
 
     @property

@@ -4,12 +4,10 @@ These tests focus on the business logic behind the onboard wizard,
 without testing the interactive UI components.
 """
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-import pytest
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard as onboard_wizard
@@ -346,6 +344,25 @@ class TestSyncWorkspaceTemplates:
         # All paths should be relative to workspace
         for path in added:
             assert not Path(path).is_absolute()
+
+    def test_seeded_user_template_uses_relationship_framing(self, tmp_path):
+        workspace = tmp_path / "workspace"
+
+        sync_workspace_templates(workspace, silent=True)
+
+        user_template = (workspace / "USER.md").read_text(encoding="utf-8")
+        assert user_template.startswith("# Relationship")
+        assert "PROFILE.md" in user_template
+        assert "INSIGHTS.md" in user_template
+        assert "Basic Information" not in user_template
+
+    def test_does_not_seed_optional_profile_or_insights_files(self, tmp_path):
+        workspace = tmp_path / "workspace"
+
+        sync_workspace_templates(workspace, silent=True)
+
+        assert not (workspace / "PROFILE.md").exists()
+        assert not (workspace / "INSIGHTS.md").exists()
 
 
 class TestProviderChannelInfo:

@@ -27,9 +27,16 @@ class CommitInfo:
 class GitStore:
     """Git-backed version control for memory files."""
 
-    def __init__(self, workspace: Path, tracked_files: list[str]):
+    def __init__(
+        self,
+        workspace: Path,
+        tracked_files: list[str],
+        *,
+        seed_missing_files: bool = True,
+    ):
         self._workspace = workspace
         self._tracked_files = tracked_files
+        self._seed_missing_files = seed_missing_files
 
     def is_initialized(self) -> bool:
         """Check if the git repo has been initialized."""
@@ -55,16 +62,17 @@ class GitStore:
             gitignore = self._workspace / ".gitignore"
             gitignore.write_text(self._build_gitignore(), encoding="utf-8")
 
-            # Ensure tracked files exist (touch them if missing) so the initial
-            # commit has something to track.
-            for rel in self._tracked_files:
-                p = self._workspace / rel
-                p.parent.mkdir(parents=True, exist_ok=True)
-                if not p.exists():
-                    p.write_text("", encoding="utf-8")
+            if self._seed_missing_files:
+                # Optionally seed tracked files so the initial commit includes
+                # empty placeholders for required memory files.
+                for rel in self._tracked_files:
+                    p = self._workspace / rel
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    if not p.exists():
+                        p.write_text("", encoding="utf-8")
 
             # Initial commit
-            porcelain.add(str(self._workspace), paths=[".gitignore"] + self._tracked_files)
+            porcelain.add(str(self._workspace), paths=["."])
             porcelain.commit(
                 str(self._workspace),
                 message=b"init: nanobot memory store",
@@ -93,11 +101,11 @@ class GitStore:
             # .gitignore excludes everything except tracked files,
             # so any staged/unstaged change must be in our files.
             st = porcelain.status(str(self._workspace))
-            if not st.unstaged and not any(st.staged.values()):
+            if not st.unstaged and not any(st.staged.values()) and not st.untracked:
                 return None
 
             msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
-            porcelain.add(str(self._workspace), paths=self._tracked_files)
+            porcelain.add(str(self._workspace), paths=["."])
             sha_bytes = porcelain.commit(
                 str(self._workspace),
                 message=msg_bytes,

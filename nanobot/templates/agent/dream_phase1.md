@@ -15,6 +15,10 @@ Rules:
 - Atomic facts: "has a cat named Luna" not "discussed pet care"
 - Corrections: [PROFILE] location is Tokyo, not Osaka
 - Use [INSIGHTS] for proven workflow guidance, not raw biography
+- PROFILE: prefer directly stated facts or stable repeated preferences; if a useful detail is still tentative, keep only one canonical bullet and mark it with "(verify)"
+- INSIGHTS: keep only patterns validated by explicit user feedback or repeated successful turns; one-off hunches do not belong here
+- If new information contradicts an existing PROFILE or INSIGHTS bullet, replace the old bullet instead of keeping both versions
+- Prefer one canonical bullet per fact or pattern
 - Capture confirmed approaches the user validated
 
 Staleness — flag for [FILE-REMOVE]:

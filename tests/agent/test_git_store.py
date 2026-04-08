@@ -1,10 +1,8 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
 import pytest
-from pathlib import Path
 
-from nanobot.utils.gitstore import GitStore, CommitInfo
-
+from nanobot.utils.gitstore import CommitInfo, GitStore
 
 TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
 
@@ -50,6 +48,13 @@ class TestInit:
         assert len(commits) == 1
         assert "init" in commits[0].message
 
+    def test_init_can_skip_seeding_missing_files(self, tmp_path):
+        git = GitStore(tmp_path, tracked_files=["PROFILE.md"], seed_missing_files=False)
+
+        assert git.init()
+        assert not (tmp_path / "PROFILE.md").exists()
+        assert len(git.log()) == 1
+
 
 class TestBuildGitignore:
     def test_subdirectory_dirs(self, git):
@@ -64,7 +69,7 @@ class TestBuildGitignore:
         content = gs._build_gitignore()
         assert "!a.md\n" in content
         assert "!b.md\n" in content
-        dir_lines = [l for l in content.split("\n") if l.startswith("!") and l.endswith("/")]
+        dir_lines = [line for line in content.split("\n") if line.startswith("!") and line.endswith("/")]
         assert dir_lines == []
 
 
@@ -93,6 +98,16 @@ class TestAutoCommit:
         git_ready.auto_commit("nothing 1")
         git_ready.auto_commit("nothing 2")
         assert len(git_ready.log()) == 1  # only init commit
+
+    def test_commits_new_tracked_file_after_seedless_init(self, tmp_path):
+        git = GitStore(tmp_path, tracked_files=["PROFILE.md"], seed_missing_files=False)
+        git.init()
+
+        (tmp_path / "PROFILE.md").write_text("profile", encoding="utf-8")
+        sha = git.auto_commit("add profile")
+
+        assert sha is not None
+        assert len(git.log()) == 2
 
 
 class TestLog:

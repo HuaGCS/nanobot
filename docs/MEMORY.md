@@ -16,7 +16,7 @@ It separates memory into layers, because different kinds of remembering deserve 
 
 - `session.messages` holds the living short-term conversation.
 - `memory/history.jsonl` is the running archive of compressed past turns.
-- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` are the durable knowledge files.
+- `SOUL.md`, `USER.md`, optional `PROFILE.md`, optional `INSIGHTS.md`, and `memory/MEMORY.md` are the durable knowledge files.
 - `GitStore` records how those durable files change over time.
 
 This keeps the system light in the moment, but reflective over time.
@@ -54,6 +54,8 @@ Dream reads:
 - new entries from `memory/history.jsonl`
 - the current `SOUL.md`
 - the current `USER.md`
+- the current `PROFILE.md` when present
+- the current `INSIGHTS.md` when present
 - the current `memory/MEMORY.md`
 
 Then it works in two phases:
@@ -68,7 +70,9 @@ This is why nanobot's memory is not just archival. It is interpretive.
 ```
 workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
-├── USER.md              # Stable knowledge about the user
+├── USER.md              # Persona-to-user relationship framing
+├── PROFILE.md           # Optional stable user facts and preferences
+├── INSIGHTS.md          # Optional collaboration heuristics and pitfalls
 └── memory/
     ├── MEMORY.md        # Project facts, decisions, and durable context
     ├── history.jsonl    # Append-only history summaries
@@ -80,9 +84,21 @@ workspace/
 These files play different roles:
 
 - `SOUL.md` remembers how nanobot should sound.
-- `USER.md` remembers who the user is and what they prefer.
+- `USER.md` remembers how the persona should relate to the user.
+- `PROFILE.md` remembers stable user facts, preferences, and habits.
+- `INSIGHTS.md` remembers validated workflow patterns, strategy notes, and recurring pitfalls.
 - `MEMORY.md` remembers what remains true about the work itself.
 - `history.jsonl` remembers what happened on the way there.
+
+## Profile And Insight Hygiene
+
+The split between `USER.md`, `PROFILE.md`, and `INSIGHTS.md` only helps if the files stay clean.
+
+- `USER.md` is not a biography file. Keep relationship framing and interaction boundaries there.
+- `PROFILE.md` is for stable user facts and preferences, not one-off guesses.
+- `INSIGHTS.md` is for learned collaboration guidance that proved useful over time, not every passing intuition.
+- When a remembered detail is tentative but still worth keeping, prefer one canonical bullet with `(verify)` over multiple competing bullets.
+- When a new fact or insight contradicts an older one, Dream should replace or remove the older bullet instead of letting both survive.
 
 ## Why `history.jsonl`
 
@@ -112,7 +128,7 @@ python -c "import json; [print(json.loads(l).get('content','')) for l in open('m
 The difference is philosophical as much as technical:
 
 - `history.jsonl` is for structure
-- `SOUL.md`, `USER.md`, and `MEMORY.md` are for meaning
+- `SOUL.md`, `USER.md`, `PROFILE.md`, `INSIGHTS.md`, and `MEMORY.md` are for meaning
 
 ## Commands
 
@@ -170,7 +186,7 @@ In practical terms:
 
 - `modelOverride: null` means Dream uses the same model as the main agent. Set it only if you want Dream to run on a different model.
 - `maxBatchSize` controls how many new `history.jsonl` entries Dream consumes in one run. Larger batches catch up faster; smaller batches are lighter and steadier.
-- `maxIterations` limits how many read/edit steps Dream can take while updating `SOUL.md`, `USER.md`, and `MEMORY.md`. It is a safety budget, not a quality score.
+- `maxIterations` limits how many read/edit steps Dream can take while updating `SOUL.md`, `USER.md`, optional `PROFILE.md` / `INSIGHTS.md`, and `MEMORY.md`. It is a safety budget, not a quality score.
 - `intervalH` is the normal way to configure Dream. Internally it runs as an `every` schedule, not as a cron expression.
 
 Legacy note:
