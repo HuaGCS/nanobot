@@ -1872,6 +1872,7 @@ The built-in admin UI currently covers:
 - Persona-local `VOICE.json`
 - Persona-local `.nanobot/st_manifest.json`
 - Inline explanations in the persona detail editor, so each file block explains what it controls before you edit it
+- A persona-page migration preview/action for older profile-style `USER.md` files, which shows the exact resulting `USER.md` / `PROFILE.md` / `INSIGHTS.md` content before splitting obvious user-profile content into `PROFILE.md` and workflow guidance into `INSIGHTS.md`
 
 If you change `agents.defaults.workspace` in the admin config editor, the current gateway instance
 now rebinds its runtime workspace immediately after saving. Fields explicitly marked `Requires

@@ -1082,6 +1082,7 @@ nanobot 现在可以把 Mem0 作为真正的用户记忆后端使用。
 - 编辑当前 runtime workspace 下 persona 的 `SOUL.md`、`USER.md`、可选 `PROFILE.md`、可选 `INSIGHTS.md`、`STYLE.md`、`LORE.md`
 - 编辑 persona 的 `VOICE.json`
 - 编辑 persona 的 `.nanobot/st_manifest.json`
+- 在 persona 页面提供旧版 `USER.md` 迁移预览/执行操作，先显示迁移后 `USER.md` / `PROFILE.md` / `INSIGHTS.md` 的实际内容，再把明显的用户画像内容拆到 `PROFILE.md`，把协作/工作方式提示拆到 `INSIGHTS.md`
 
 如果你在 admin 页面里改了 `agents.defaults.workspace`，当前 gateway 实例会在保存后立即切换到
 新的 runtime workspace。只有表单里明确标注“需重启”的字段，才需要重启当前进程才能生效。

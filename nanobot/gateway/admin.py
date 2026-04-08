@@ -13,6 +13,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from html import escape
+from importlib.resources import files as pkg_files
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
@@ -51,6 +52,45 @@ _MEMORIX_MCP_DEFAULT_COMMAND = "memorix"
 _MEMORIX_MCP_DEFAULT_ARGS = ("serve",)
 _MEMORIX_MCP_DEFAULT_TIMEOUT = 60
 _WEIXIN_ADMIN_SESSION_TTL_S = 15 * 60
+_LEGACY_USER_PROFILE_TITLE_RE = re.compile(r"^#\s*(user profile|用户画像|用户资料)\s*$", re.IGNORECASE)
+_LEGACY_USER_PROFILE_SECTION_TITLES = {
+    "basic information",
+    "preferences",
+    "communication style",
+    "response length",
+    "technical level",
+    "work context",
+    "topics of interest",
+    "基本信息",
+    "偏好",
+    "沟通风格",
+    "回复长度",
+    "技术水平",
+    "工作背景",
+    "工作上下文",
+    "兴趣主题",
+}
+_LEGACY_USER_INSIGHTS_SECTION_TITLES = {
+    "special instructions",
+    "workflow",
+    "collaboration",
+    "working style",
+    "decision rules",
+    "heuristics",
+    "pitfalls",
+    "strategy",
+    "特别说明",
+    "协作方式",
+    "工作方式",
+    "决策规则",
+    "启发",
+    "坑点",
+    "策略",
+}
+_LEGACY_USER_RELATIONSHIP_SECTION_TITLES = {
+    "relationship",
+    "关系",
+}
 
 
 @dataclass(frozen=True)
@@ -1610,6 +1650,7 @@ def register_admin_routes(
     app.router.add_get("/admin/personas", _admin_personas_page)
     app.router.add_post("/admin/personas/new", _admin_persona_create)
     app.router.add_get("/admin/personas/{persona:[A-Za-z0-9_-]+}", _admin_persona_page)
+    app.router.add_post("/admin/personas/{persona:[A-Za-z0-9_-]+}/migrate-user", _admin_persona_migrate_user)
     app.router.add_post("/admin/personas/{persona:[A-Za-z0-9_-]+}", _admin_persona_submit)
 
 
@@ -2952,6 +2993,170 @@ def _write_text_file(path: Path, content: str, *, optional: bool = False) -> Non
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content.rstrip() + "\n" if content else "", encoding="utf-8")
+
+
+def _normalize_markdown_title(title: str) -> str:
+    return re.sub(r"\s+", " ", title.strip().strip("#")).strip().lower()
+
+
+def _default_user_template_text() -> str:
+    try:
+        return (pkg_files("nanobot") / "templates" / "USER.md").read_text(encoding="utf-8")
+    except Exception:
+        return "# Relationship\n"
+
+
+def _split_markdown_level2_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
+    normalized = text.replace("\r\n", "\n").strip()
+    if not normalized:
+        return "", []
+
+    lines = normalized.split("\n")
+    preamble: list[str] = []
+    sections: list[tuple[str, str]] = []
+    current_heading: str | None = None
+    current_lines: list[str] = []
+
+    for line in lines:
+        if line.startswith("## "):
+            if current_heading is None:
+                current_heading = line
+            else:
+                sections.append((current_heading, "\n".join(current_lines).strip()))
+                current_heading = line
+            current_lines = []
+            continue
+
+        if current_heading is None:
+            preamble.append(line)
+        else:
+            current_lines.append(line)
+
+    if current_heading is not None:
+        sections.append((current_heading, "\n".join(current_lines).strip()))
+
+    return "\n".join(preamble).strip(), sections
+
+
+def _join_markdown_block(heading: str, body: str) -> str:
+    body = body.strip()
+    return f"{heading}\n\n{body}".strip() if body else heading.strip()
+
+
+def _append_markdown_blocks(existing: str, blocks: list[str]) -> str:
+    merged = existing.strip()
+    for block in blocks:
+        candidate = block.strip()
+        if not candidate:
+            continue
+        if candidate in merged:
+            continue
+        merged = f"{merged}\n\n{candidate}".strip() if merged else candidate
+    return merged
+
+
+def _section_body(block: str) -> str:
+    lines = block.strip().splitlines()
+    if len(lines) >= 3 and lines[0].startswith("## "):
+        return "\n".join(lines[2:]).strip()
+    return block.strip()
+
+
+def _classify_legacy_user_sections(
+    user_text: str,
+) -> tuple[str, list[str], list[str], list[str], bool]:
+    preamble, sections = _split_markdown_level2_sections(user_text)
+    if not sections:
+        return user_text, [], [], [], False
+
+    moved_profile: list[str] = []
+    moved_insights: list[str] = []
+    kept_sections: list[str] = []
+
+    for heading, body in sections:
+        title = _normalize_markdown_title(heading[3:])
+        block = _join_markdown_block(heading, body)
+        if title in _LEGACY_USER_PROFILE_SECTION_TITLES:
+            moved_profile.append(block)
+        elif title in _LEGACY_USER_INSIGHTS_SECTION_TITLES:
+            moved_insights.append(block)
+        else:
+            kept_sections.append(block)
+
+    preamble = preamble.strip()
+    is_legacy_profile_shell = bool(
+        preamble and _LEGACY_USER_PROFILE_TITLE_RE.match(preamble.splitlines()[0].strip())
+    )
+    return preamble, moved_profile, moved_insights, kept_sections, is_legacy_profile_shell
+
+
+def _legacy_user_migration_preview(
+    user_text: str,
+    profile_text: str,
+    insights_text: str,
+) -> dict[str, Any] | None:
+    migrated_user, migrated_profile, migrated_insights, moved_profile, moved_insights = (
+        _migrate_legacy_user_sections(user_text, profile_text, insights_text)
+    )
+    if moved_profile == 0 and moved_insights == 0:
+        return None
+
+    result_files: list[dict[str, str]] = []
+    if migrated_user.strip() != user_text.strip():
+        result_files.append({"name": "USER.md", "content": migrated_user})
+    if migrated_profile.strip() != profile_text.strip():
+        result_files.append({"name": "PROFILE.md", "content": migrated_profile})
+    if migrated_insights.strip() != insights_text.strip():
+        result_files.append({"name": "INSIGHTS.md", "content": migrated_insights})
+
+    return {
+        "profile_count": moved_profile,
+        "insights_count": moved_insights,
+        "result_files": result_files,
+    }
+
+
+def _migrate_legacy_user_sections(
+    user_text: str,
+    profile_text: str,
+    insights_text: str,
+) -> tuple[str, str, str, int, int]:
+    preamble, moved_profile, moved_insights, kept_sections, is_legacy_profile_shell = (
+        _classify_legacy_user_sections(user_text)
+    )
+    if not moved_profile and not moved_insights:
+        return user_text, profile_text, insights_text, 0, 0
+
+    migrated_profile = _append_markdown_blocks(profile_text, moved_profile)
+    migrated_insights = _append_markdown_blocks(insights_text, moved_insights)
+
+    if is_legacy_profile_shell:
+        user_parts = ["# Relationship"]
+        if kept_sections:
+            for block in kept_sections:
+                title = _normalize_markdown_title(block.splitlines()[0][3:])
+                user_parts.append(
+                    _section_body(block)
+                    if title in _LEGACY_USER_RELATIONSHIP_SECTION_TITLES
+                    else block
+                )
+            migrated_user = "\n\n".join(part for part in user_parts if part.strip())
+        else:
+            migrated_user = _default_user_template_text().strip()
+    else:
+        parts = [preamble] if preamble else []
+        parts.extend(kept_sections)
+        migrated_user = "\n\n".join(part for part in parts if part.strip()).strip()
+        if not migrated_user:
+            migrated_user = _default_user_template_text().strip()
+
+    return (
+        migrated_user,
+        migrated_profile,
+        migrated_insights,
+        len(moved_profile),
+        len(moved_insights),
+    )
 
 
 def _write_json_file(
@@ -4928,6 +5133,7 @@ def _render_persona_detail_page(
     *,
     persona: str,
     values: dict[str, str],
+    migration_preview: dict[str, Any] | None = None,
     flash: str | None = None,
     error: str | None = None,
 ) -> web.Response:
@@ -4942,6 +5148,59 @@ def _render_persona_detail_page(
             "</label>"
         )
 
+    preview_card = ""
+    if migration_preview:
+        result_title_keys = {
+            "USER.md": "admin_persona_migration_user_result_title",
+            "PROFILE.md": "admin_persona_migration_profile_result_title",
+            "INSIGHTS.md": "admin_persona_migration_insights_result_title",
+        }
+        result_sections = "".join(
+            f"""
+              <div class="stack">
+                <div><strong>{escape(_t(request, result_title_keys[result["name"]]))}</strong></div>
+                <pre class="code-block"><code>{escape(result["content"])}</code></pre>
+              </div>
+            """
+            for result in migration_preview["result_files"]
+        )
+        preview_card = f"""
+          <section class="card stack">
+            <div class="section-head">
+              <h2>{escape(_t(request, "admin_persona_migration_preview_title"))}</h2>
+              <div class="muted">{_th(request, "admin_persona_migration_preview_desc")}</div>
+            </div>
+            <div class="stat-grid">
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_persona_migration_profile_count_label"))}</span>
+                <strong>{migration_preview["profile_count"]}</strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_persona_migration_insights_count_label"))}</span>
+                <strong>{migration_preview["insights_count"]}</strong>
+              </div>
+            </div>
+            <div class="stack">
+              <div><strong>{escape(_t(request, "admin_persona_migration_result_title"))}</strong></div>
+              {result_sections}
+            </div>
+            <div class="actions">
+              <form method="post" action="/admin/personas/{escape(persona)}/migrate-user" class="inline-form">
+                <button type="submit" class="ghost">{escape(_t(request, "admin_button_migrate_persona_user"))}</button>
+              </form>
+            </div>
+          </section>
+        """
+    else:
+        preview_card = f"""
+          <section class="card stack">
+            <div class="section-head">
+              <h2>{escape(_t(request, "admin_persona_migration_preview_title"))}</h2>
+              <div class="muted">{_th(request, "admin_persona_migration_none_desc")}</div>
+            </div>
+          </section>
+        """
+
     body = f"""
       <div class="hero-grid">
         <div class="card stack spotlight">
@@ -4954,8 +5213,10 @@ def _render_persona_detail_page(
           <span class="eyebrow">{escape(_t(request, "admin_button_save_persona"))}</span>
           <div class="muted">{_th(request, "admin_persona_intro")}</div>
           <div class="muted">{_th(request, "admin_persona_optional_hint")}</div>
+          <div class="muted">{_th(request, "admin_persona_migrate_desc")}</div>
         </div>
       </div>
+      {preview_card}
       <form method="post" action="/admin/personas/{escape(persona)}" class="stack" id="persona-form">
         <div class="editor-grid">
           {_editor_card("SOUL.md", "admin_persona_soul_desc", "soul_md", values["SOUL.md"])}
@@ -5008,7 +5269,26 @@ async def _admin_persona_page(request: web.Request) -> web.Response:
         flash = _t(request, "admin_persona_created")
     elif request.query.get("saved") == "updated":
         flash = _t(request, "admin_persona_updated")
-    return _render_persona_detail_page(request, persona=persona, values=values, flash=flash)
+    elif request.query.get("migrated") == "1":
+        flash = _t(
+            request,
+            "admin_persona_migrated",
+            profile=request.query.get("profile", "0"),
+            insights=request.query.get("insights", "0"),
+        )
+    elif request.query.get("migrated") == "none":
+        flash = _t(request, "admin_persona_migrate_noop")
+    return _render_persona_detail_page(
+        request,
+        persona=persona,
+        values=values,
+        migration_preview=_legacy_user_migration_preview(
+            values["USER.md"],
+            values["PROFILE.md"],
+            values["INSIGHTS.md"],
+        ),
+        flash=flash,
+    )
 
 
 async def _admin_persona_submit(request: web.Request) -> web.Response:
@@ -5048,6 +5328,70 @@ async def _admin_persona_submit(request: web.Request) -> web.Response:
             object_required_message=_t(request, "admin_json_object_required"),
         )
     except Exception as exc:
-        return _render_persona_detail_page(request, persona=persona, values=values, error=str(exc))
+        return _render_persona_detail_page(
+            request,
+            persona=persona,
+            values=values,
+            migration_preview=_legacy_user_migration_preview(
+                values["USER.md"],
+                values["PROFILE.md"],
+                values["INSIGHTS.md"],
+            ),
+            error=str(exc),
+        )
 
     raise _redirect(request, f"/admin/personas/{quote(persona, safe='')}?saved=updated")
+
+
+async def _admin_persona_migrate_user(request: web.Request) -> web.Response:
+    _require_admin_auth(request)
+    persona = _resolved_persona_or_404(request)
+    files = _persona_file_map(_runtime_workspace(request), persona)
+    values = {
+        "USER.md": _read_text(files["USER.md"]),
+        "PROFILE.md": _read_text(files["PROFILE.md"]),
+        "INSIGHTS.md": _read_text(files["INSIGHTS.md"]),
+    }
+
+    try:
+        _ensure_persona_scaffold(_runtime_workspace(request), persona)
+        user_md, profile_md, insights_md, moved_profile, moved_insights = _migrate_legacy_user_sections(
+            values["USER.md"],
+            values["PROFILE.md"],
+            values["INSIGHTS.md"],
+        )
+        if moved_profile == 0 and moved_insights == 0:
+            raise _redirect(request, f"/admin/personas/{quote(persona, safe='')}?migrated=none")
+
+        _write_text_file(files["USER.md"], user_md, optional=False)
+        _write_text_file(files["PROFILE.md"], profile_md, optional=True)
+        _write_text_file(files["INSIGHTS.md"], insights_md, optional=True)
+    except web.HTTPFound:
+        raise
+    except Exception as exc:
+        page_values = {
+            "SOUL.md": _read_text(files["SOUL.md"]),
+            "USER.md": values["USER.md"],
+            "PROFILE.md": values["PROFILE.md"],
+            "INSIGHTS.md": values["INSIGHTS.md"],
+            "STYLE.md": _read_text(files["STYLE.md"]),
+            "LORE.md": _read_text(files["LORE.md"]),
+            "VOICE.json": _read_json_text(files["VOICE.json"]),
+            "st_manifest.json": _read_json_text(files["st_manifest.json"]),
+        }
+        return _render_persona_detail_page(
+            request,
+            persona=persona,
+            values=page_values,
+            migration_preview=_legacy_user_migration_preview(
+                page_values["USER.md"],
+                page_values["PROFILE.md"],
+                page_values["INSIGHTS.md"],
+            ),
+            error=str(exc),
+        )
+
+    raise _redirect(
+        request,
+        f"/admin/personas/{quote(persona, safe='')}?migrated=1&profile={moved_profile}&insights={moved_insights}",
+    )

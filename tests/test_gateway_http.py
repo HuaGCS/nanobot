@@ -1092,6 +1092,8 @@ async def test_gateway_admin_persona_editor_updates_files(tmp_path: Path) -> Non
     assert "角色对用户的默认态度、关系定位和互动边界" in persona_page.text
     assert "可选的长期用户画像" in persona_page.text
     assert "可选的长期协作洞察" in persona_page.text
+    assert "迁移预览" in persona_page.text
+    assert "当前没有检测到明显需要迁移的旧版“用户画像型”" in persona_page.text
     assert "可选的语音/TTS 覆盖配置" in persona_page.text
     assert "可选的角色元数据" in persona_page.text
 
@@ -1128,3 +1130,106 @@ async def test_gateway_admin_persona_editor_updates_files(tmp_path: Path) -> Non
     assert json.loads((persona_dir / "VOICE.json").read_text(encoding="utf-8"))["provider"] == "edge"
     manifest_path = persona_dir / ".nanobot" / "st_manifest.json"
     assert json.loads(manifest_path.read_text(encoding="utf-8"))["reference_image"] == "assets/avatar.png"
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_persona_migrates_legacy_user_md(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    config_path = tmp_path / "config.json"
+
+    config = Config()
+    config.gateway.admin.enabled = True
+    config.gateway.admin.auth_key = "secret-key"
+    save_config(config, config_path)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        data={"auth_key": "secret-key", "next": "/admin"},
+    )
+    cookie = login.cookies["nanobot_admin_session"].value
+
+    create_resp = await _call_route(
+        app,
+        "POST",
+        "/admin/personas/new",
+        cookies={"nanobot_admin_session": cookie},
+        data={"name": "Aria"},
+    )
+    assert create_resp.status == 302
+
+    persona_dir = workspace / "personas" / "Aria"
+    (persona_dir / "USER.md").write_text(
+        "# User Profile\n\n"
+        "Information about the user to help personalize interactions.\n\n"
+        "## Basic Information\n\n"
+        "- **Timezone**: UTC+8\n"
+        "- **Language**: Chinese\n\n"
+        "## Preferences\n\n"
+        "### Communication Style\n\n"
+        "- [x] Technical\n\n"
+        "## Special Instructions\n\n"
+        "- Prefer short iterative review loops.\n\n"
+        "## Relationship\n\n"
+        "- Stay collaborative.\n",
+        encoding="utf-8",
+    )
+    (persona_dir / "PROFILE.md").write_text("# Profile\n\n- Uses Arch Linux.\n", encoding="utf-8")
+
+    preview_page = await _call_route(
+        app,
+        "GET",
+        "/admin/personas/Aria",
+        cookies={"nanobot_admin_session": cookie},
+    )
+    assert preview_page.status == 200
+    assert "迁移预览" in preview_page.text
+    assert "迁移后文件" in preview_page.text
+    assert "迁移后的 USER.md" in preview_page.text
+    assert "迁移后的 PROFILE.md" in preview_page.text
+    assert "迁移后的 INSIGHTS.md" in preview_page.text
+    assert "# Relationship" in preview_page.text
+    assert "Uses Arch Linux." in preview_page.text
+    assert "Basic Information" in preview_page.text
+    assert "Special Instructions" in preview_page.text
+
+    migrate_resp = await _call_route(
+        app,
+        "POST",
+        "/admin/personas/Aria/migrate-user",
+        cookies={"nanobot_admin_session": cookie},
+    )
+    assert migrate_resp.status == 302
+    assert migrate_resp.headers["Location"] == "/admin/personas/Aria?migrated=1&profile=2&insights=1"
+
+    assert (persona_dir / "PROFILE.md").read_text(encoding="utf-8") == (
+        "# Profile\n\n"
+        "- Uses Arch Linux.\n\n"
+        "## Basic Information\n\n"
+        "- **Timezone**: UTC+8\n"
+        "- **Language**: Chinese\n\n"
+        "## Preferences\n\n"
+        "### Communication Style\n\n"
+        "- [x] Technical\n"
+    )
+    assert (persona_dir / "INSIGHTS.md").read_text(encoding="utf-8") == (
+        "## Special Instructions\n\n"
+        "- Prefer short iterative review loops.\n"
+    )
+    assert (persona_dir / "USER.md").read_text(encoding="utf-8") == (
+        "# Relationship\n\n"
+        "- Stay collaborative.\n"
+    )
+
+    migrated_page = await _call_route(
+        app,
+        "GET",
+        "/admin/personas/Aria?migrated=1&profile=2&insights=1",
+        cookies={"nanobot_admin_session": cookie},
+    )
+    assert migrated_page.status == 200
+    assert "迁移完成" in migrated_page.text
+    assert "PROFILE.md" in migrated_page.text
+    assert "INSIGHTS.md" in migrated_page.text
