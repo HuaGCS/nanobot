@@ -754,6 +754,14 @@ _CONFIG_FIELDS = (
         placeholder="__default__",
     ),
     ConfigFieldSpec(
+        "memory_user_backend",
+        ("memory", "user", "backend"),
+        "select",
+        "admin_config_mem0_backend_label",
+        "admin_config_mem0_backend_tooltip",
+        options=("file", "mem0"),
+    ),
+    ConfigFieldSpec(
         "memory_user_shadow_write_mem0",
         ("memory", "user", "shadowWriteMem0"),
         "bool",
@@ -1488,6 +1496,7 @@ _CONFIG_SECTIONS = (
         "admin_config_section_mem0_title",
         "admin_config_section_mem0_desc",
         (
+            "memory_user_backend",
             "memory_user_shadow_write_mem0",
             "memory_user_mem0_mode",
             "memory_user_mem0_llm_provider",
@@ -3198,6 +3207,7 @@ def _config_form_values(config: Config) -> dict[str, Any]:
         "tools_image_gen_proxy": config.tools.image_gen.proxy or "",
         "tools_image_gen_timeout": str(config.tools.image_gen.timeout),
         "tools_image_gen_reference_image": config.tools.image_gen.reference_image,
+        "memory_user_backend": config.memory.user.backend,
         "memory_user_shadow_write_mem0": config.memory.user.shadow_write_mem0,
         "memory_user_mem0_mode": config.memory.user.mem0.mode,
         "memory_user_mem0_llm_provider": config.memory.user.mem0.llm.provider,

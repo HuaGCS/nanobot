@@ -971,15 +971,17 @@ HTTP 示例：
 这意味着项目历史、设计原因、排障经验等问题可以直接利用 Memorix，但不会替代当前文件记忆主链路。
 如果你使用内置 admin 页面，现在也可以直接在可视化配置里编辑专门的 `Memorix MCP` 分区。
 
-### Mem0 预留配置
+### Mem0 用户记忆
 
-`memory.user.mem0` 目前仍然只是预留配置结构，不会因为填了 key、url 或 model 就自动启用 Mem0 运行时后端。
+nanobot 现在可以把 Mem0 作为真正的用户记忆后端使用。
 
-当前建议形态：
-
-- `llm`、`embedder`、`vectorStore` 优先使用显式字段：`provider`、`apiKey`、`url`、`model`
-- `headers`、`config` 作为高级扩展对象保留
-- 顶层 `metadata` 可用于后续接入时补充租户、环境或标签信息
+- `memory.user.backend: "file" | "mem0"` 用来选择主用户记忆后端。默认仍是 `file`，继续把 persona 的 `MEMORY.md` 注入 prompt。
+- `memory.user.backend: "mem0"` 时，会从 Mem0 检索记忆上下文，并在每轮完成后把 turn 写入 Mem0。
+- 当 `memory.user.backend=mem0` 时，nanobot 仍会保留 file 侧的 `MEMORY.md` 作为 prompt 注入保底来源；如果 Mem0 没检索到内容或查询失败，会自动回退到现有文件记忆。
+- `memory.user.shadowWriteMem0: true` 可以保持 `file` 为主后端，同时并行双写到 Mem0。
+- 运行时需要额外安装依赖：`uv sync --extra mem0` 或 `pip install nanobot-ai[mem0]`。
+- `memory.user.mem0.llm`、`embedder`、`vectorStore` 建议优先使用显式字段：`provider`、`apiKey`、`url`、`model`、`headers`。
+- provider 私有扩展参数继续放在 `config` 中，顶层 `metadata` 会在写入 Mem0 时一起附带。
 
 示例：
 
@@ -987,6 +989,7 @@ HTTP 示例：
 {
   "memory": {
     "user": {
+      "backend": "mem0",
       "shadowWriteMem0": false,
       "mem0": {
         "llm": {
@@ -1018,7 +1021,7 @@ HTTP 示例：
 }
 ```
 
-如果你使用内置 admin 页面，现在也可以直接在可视化配置里编辑 `Mem0 预留配置` 分区，包括常用字段和 `headers` / `config` / `metadata` 的 JSON textarea。
+如果你使用内置 admin 页面，现在也可以直接在可视化配置里编辑 `Mem0 用户记忆` 分区，包括 `memory.user.backend`、`shadowWriteMem0`，以及常用字段和 `headers` / `config` / `metadata` 的 JSON textarea。
 
 ### 安全
 
@@ -1072,7 +1075,7 @@ HTTP 示例：
 - admin 内置专门的 Weixin 扫码登录页，可直接为当前实例申请并轮询个人微信登录二维码；扫码成功后，token 会保存到当前实例的 Weixin 状态文件
 - 可视化编辑 `tools.exec`，用于控制 shell 命令执行、超时时间和额外 PATH
 - 可视化编辑专门的 `Memorix MCP` 分区，对应 `tools.mcpServers.memorix`
-- 可视化编辑 `Mem0 预留配置` 分区，对应 `memory.user.mem0`
+- 可视化编辑 `Mem0 用户记忆` 分区，对应 `memory.user.backend`、`shadowWriteMem0` 和 `memory.user.mem0`
 - 独立的命令总览页，展示所有聊天 slash 命令、别名和用法
 - 每个可视化配置项都带悬浮说明，鼠标移动到字段名即可查看详细解释
 - 每个可视化配置项都会直接标注“可热重载”或“需重启”

@@ -812,18 +812,19 @@ class Mem0ProviderConfig(Base):
 
 
 class Mem0Config(Base):
-    """Reserved Mem0 OSS configuration shape for future backend integration."""
+    """Mem0 OSS configuration used by the runtime user-memory backend."""
 
     mode: Literal["embedded"] = "embedded"
     llm: Mem0ProviderConfig = Field(default_factory=Mem0ProviderConfig)
     embedder: Mem0ProviderConfig = Field(default_factory=Mem0ProviderConfig)
     vector_store: Mem0ProviderConfig = Field(default_factory=Mem0ProviderConfig)
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class UserMemoryConfig(Base):
     """User-scoped long-term memory settings."""
 
+    backend: Literal["file", "mem0"] = "file"
     shadow_write_mem0: bool = False
     mem0: Mem0Config = Field(default_factory=Mem0Config)
 

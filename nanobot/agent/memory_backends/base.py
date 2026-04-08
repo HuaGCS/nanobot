@@ -11,7 +11,7 @@ class UserMemoryBackend(ABC):
     """Backend abstraction for user-scoped long-term memory."""
 
     @abstractmethod
-    def resolve_context(self, scope: MemoryScope) -> ResolvedMemoryContext:
+    async def resolve_context(self, scope: MemoryScope) -> ResolvedMemoryContext:
         """Return the memory block that should be injected into the prompt."""
 
     async def commit_turn(self, request: MemoryCommitRequest) -> None:

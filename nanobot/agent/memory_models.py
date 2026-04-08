@@ -18,6 +18,7 @@ class MemoryScope:
     sender_id: str | None
     persona: str
     language: str
+    query: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

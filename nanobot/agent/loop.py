@@ -30,7 +30,9 @@ from nanobot.agent.i18n import (
     text,
 )
 from nanobot.agent.memory import Consolidator, Dream
+from nanobot.agent.memory_backends.base import UserMemoryBackend
 from nanobot.agent.memory_backends.file_backend import FileUserMemoryBackend
+from nanobot.agent.memory_backends.mem0_backend import Mem0UserMemoryBackend
 from nanobot.agent.memory_models import MemoryCommitRequest, MemoryScope
 from nanobot.agent.memory_router import MemoryRouter
 from nanobot.agent.personas import (
@@ -392,6 +394,7 @@ class AgentLoop:
         sender_id: str | None,
         persona: str | None = None,
         language: str | None = None,
+        query: str | None = None,
     ) -> MemoryScope:
         """Build the normalized scope used by memory backends."""
         return MemoryScope(
@@ -402,6 +405,7 @@ class AgentLoop:
             sender_id=sender_id,
             persona=persona or self._get_session_persona(session),
             language=language or self._get_session_language(session),
+            query=query,
         )
 
     async def _commit_memory_turn(
@@ -691,7 +695,40 @@ class AgentLoop:
 
     def _configure_memory_router(self) -> None:
         """Build the current memory router from runtime config."""
-        self.memory_router = MemoryRouter(user_backend=FileUserMemoryBackend())
+        user_backend = self._build_user_memory_backend(self.memory_config)
+        fallback_backend = self._build_memory_fallback_backend(self.memory_config, user_backend)
+        shadow_backends = self._build_shadow_memory_backends(self.memory_config, user_backend)
+        self.memory_router = MemoryRouter(
+            user_backend=user_backend,
+            fallback_backend=fallback_backend,
+            shadow_backends=shadow_backends,
+        )
+
+    def _build_user_memory_backend(self, config: MemoryConfig) -> UserMemoryBackend:
+        """Create the configured primary user-memory backend."""
+        if config.user.backend == "mem0":
+            return Mem0UserMemoryBackend(config.user.mem0)
+        return FileUserMemoryBackend()
+
+    def _build_memory_fallback_backend(
+        self,
+        config: MemoryConfig,
+        primary: UserMemoryBackend,
+    ) -> UserMemoryBackend | None:
+        """Keep file-backed memory as the conservative fallback when Mem0 is primary."""
+        if config.user.backend == "mem0":
+            return FileUserMemoryBackend()
+        return None
+
+    def _build_shadow_memory_backends(
+        self,
+        config: MemoryConfig,
+        primary: UserMemoryBackend,
+    ) -> list[UserMemoryBackend]:
+        """Create optional shadow backends that receive writes in parallel."""
+        if config.user.shadow_write_mem0 and not isinstance(primary, Mem0UserMemoryBackend):
+            return [Mem0UserMemoryBackend(config.user.mem0)]
+        return []
 
     def _apply_runtime_config(self, config) -> bool:
         """Apply hot-reloadable config to the current agent instance."""
@@ -1620,8 +1657,9 @@ class AgentLoop:
                 sender_id=msg.sender_id,
                 persona=persona,
                 language=language,
+                query=msg.content,
             )
-            resolved_memory = self.memory_router.prepare_context(memory_scope)
+            resolved_memory = await self.memory_router.prepare_context(memory_scope)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content,
@@ -1693,8 +1731,9 @@ class AgentLoop:
             sender_id=msg.sender_id,
             persona=persona,
             language=language,
+            query=msg.content,
         )
-        resolved_memory = self.memory_router.prepare_context(memory_scope)
+        resolved_memory = await self.memory_router.prepare_context(memory_scope)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,

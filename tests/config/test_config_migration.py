@@ -1,4 +1,5 @@
 import json
+import socket
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +7,6 @@ from typer.testing import CliRunner
 
 from nanobot.cli.commands import _resolve_channel_default_config, app
 from nanobot.config.loader import load_config, save_config
-from nanobot.security.network import validate_url_target
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -72,6 +72,7 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
 def test_save_config_persists_memory_shadow_write_settings(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config = load_config(config_path)
+    config.memory.user.backend = "mem0"
     config.memory.user.shadow_write_mem0 = True
     config.memory.user.mem0.llm.provider = "ollama"
     config.memory.user.mem0.llm.model = "qwen3:8b"
@@ -86,6 +87,7 @@ def test_save_config_persists_memory_shadow_write_settings(tmp_path) -> None:
     save_config(config, config_path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
 
+    assert saved["memory"]["user"]["backend"] == "mem0"
     assert saved["memory"]["user"]["shadowWriteMem0"] is True
     assert saved["memory"]["user"]["mem0"]["llm"]["provider"] == "ollama"
     assert saved["memory"]["user"]["mem0"]["llm"]["model"] == "qwen3:8b"
@@ -100,13 +102,14 @@ def test_save_config_persists_memory_shadow_write_settings(tmp_path) -> None:
     )
 
 
-def test_load_config_parses_reserved_mem0_provider_api_fields(tmp_path) -> None:
+def test_load_config_parses_mem0_runtime_provider_api_fields(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps(
             {
                 "memory": {
                     "user": {
+                        "backend": "mem0",
                         "mem0": {
                             "llm": {
                                 "provider": "openai",
@@ -136,6 +139,7 @@ def test_load_config_parses_reserved_mem0_provider_api_fields(tmp_path) -> None:
 
     config = load_config(config_path)
 
+    assert config.memory.user.backend == "mem0"
     assert config.memory.user.mem0.llm.api_key == "llm-key"
     assert config.memory.user.mem0.llm.url == "https://llm.example.com/v1"
     assert config.memory.user.mem0.llm.model == "gpt-4.1-mini"

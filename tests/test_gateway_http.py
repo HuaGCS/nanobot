@@ -342,13 +342,14 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert 'data-provider-pool-editor' in config_page.text
     assert 'data-provider-pool-move-up' in config_page.text
     assert 'data-provider-pool-move-down' in config_page.text
+    assert 'name="memory_user_backend"' in config_page.text
     assert 'name="memory_user_mem0_llm_api_key"' in config_page.text
     assert 'name="memory_user_mem0_llm_headers"' in config_page.text
     assert 'name="memory_user_mem0_metadata"' in config_page.text
     assert 'name="tools_mcp_memorix_enabled"' in config_page.text
     assert "tooltip-anchor" in config_page.text
     assert "默认工作区路径" in config_page.text
-    assert "Mem0 预留配置" in config_page.text
+    assert "Mem0 用户记忆" in config_page.text
     assert "Memorix MCP" in config_page.text
     assert "Star Office 推送" in config_page.text
     assert "Shell 执行" in config_page.text
@@ -389,6 +390,7 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
             ("__bool_fields", "channels_telegram_enabled"),
             ("__bool_fields", "channels_weixin_enabled"),
             ("__bool_fields", "tools_exec_enable"),
+            ("memory_user_backend", "mem0"),
             ("memory_user_shadow_write_mem0", "1"),
             ("gateway_status_enabled", "1"),
             ("gateway_status_auth_key", "status-secret"),
@@ -463,6 +465,7 @@ async def test_gateway_admin_uses_default_chinese_theme_and_visual_config_save(t
     assert saved["agents"]["defaults"]["model"] == "openai/gpt-4.1"
     assert saved["channels"]["voiceReply"]["provider"] == "sovits"
     assert saved["channels"]["voiceReply"]["sovitsApiUrl"] == "http://127.0.0.1:9880"
+    assert saved["memory"]["user"]["backend"] == "mem0"
     assert saved["memory"]["user"]["shadowWriteMem0"] is True
     assert saved["memory"]["user"]["mem0"]["llm"]["provider"] == "openai"
     assert saved["memory"]["user"]["mem0"]["llm"]["apiKey"] == "mem0-llm-key"
@@ -593,7 +596,8 @@ async def test_gateway_admin_language_switch_and_raw_json_editor(tmp_path: Path)
     assert 'name="channels_weixin_allow_from"' in config_page.text
     assert 'data-provider-pool-move-up' in config_page.text
     assert 'data-provider-pool-move-down' in config_page.text
-    assert "Mem0 Reserved Config" in config_page.text
+    assert 'name="memory_user_backend"' in config_page.text
+    assert "Mem0 User Memory" in config_page.text
     assert 'name="memory_user_mem0_llm_api_key"' in config_page.text
     assert 'name="memory_user_mem0_llm_headers"' in config_page.text
     assert 'name="memory_user_mem0_metadata"' in config_page.text

@@ -1751,20 +1751,41 @@ real `memorix` binary or background server instead of `npx`. The built-in admin 
 dedicated visual `Memorix MCP` section for `tools.mcpServers.memorix`; other MCP servers still use
 the raw JSON editor.
 
-The reserved `memory.user.mem0` config block is currently stored for future integration only; it does
-not enable any runtime Mem0 backend by itself. Its provider sections (`llm`, `embedder`,
-`vectorStore`) now prefer explicit `provider`, `apiKey`, `url`, `model`, and `headers` fields, with
-`config` kept as an escape hatch for provider-specific extras such as collection names. The built-in
-admin UI now exposes a dedicated visual section for the common reserved Mem0 fields as well,
-including JSON textareas for `headers`, `config`, and top-level `metadata`, but it still does not
-turn Mem0 on at runtime by itself.
+### Mem0 User Memory
+
+nanobot now supports Mem0 as a real user-memory backend.
+
+- `memory.user.backend: "file" | "mem0"` selects the primary user-memory backend. `file` remains
+  the default and keeps using persona `MEMORY.md` for prompt injection.
+- `memory.user.backend: "mem0"` resolves prompt memory from Mem0 search results and writes each
+  completed turn to Mem0.
+- When `memory.user.backend` is `mem0`, nanobot still keeps file-backed `MEMORY.md` as the prompt
+  fallback. If Mem0 returns no useful context or the lookup fails, prompt injection falls back to
+  the existing file memory instead of going blank.
+- `memory.user.shadowWriteMem0: true` keeps `file` as the primary backend while also writing
+  completed turns to Mem0 in parallel.
+- Install the optional runtime dependency with `uv sync --extra mem0` or
+  `pip install nanobot-ai[mem0]`.
+- Inside `memory.user.mem0`, prefer explicit `provider`, `apiKey`, `url`, `model`, and `headers`
+  fields for `llm`, `embedder`, and `vectorStore`; keep provider-specific extras under `config`.
+- Top-level `memory.user.mem0.metadata` is attached to Mem0 writes as extra tags.
+
+The built-in admin UI also exposes a dedicated visual `Mem0 User Memory` section for
+`memory.user.backend`, `shadowWriteMem0`, and the common Mem0 provider fields.
 
 ```json
 {
   "memory": {
     "user": {
+      "backend": "mem0",
       "shadowWriteMem0": false,
       "mem0": {
+        "llm": {
+          "provider": "openai",
+          "apiKey": "mem0-llm-key",
+          "url": "https://api.mem0.ai/v1",
+          "model": "gpt-4.1-mini"
+        },
         "embedder": {
           "provider": "openai",
           "apiKey": "embed-key",
@@ -1780,6 +1801,9 @@ turn Mem0 on at runtime by itself.
           "config": {
             "collectionName": "nanobot_user_memory"
           }
+        },
+        "metadata": {
+          "tenant": "prod"
         }
       }
     }
@@ -1840,6 +1864,7 @@ The built-in admin UI currently covers:
 - Visual editing for common single-instance channel credential blocks such as `whatsapp`, `telegram`, `discord`, `feishu`, `dingtalk`, `slack`, `qq`, `matrix`, `weixin`, and `wecom`; channels already using `instances` stay read-only here and remain editable through raw JSON
 - A dedicated Weixin QR-login page inside admin, so the current instance can request and poll a personal Weixin login QR code without leaving the UI; successful scans save the token into the current instance's Weixin state file
 - Visual `tools.exec` editing for enabling/disabling shell execution, command timeout, and extra PATH entries
+- Visual `Mem0 User Memory` editing for `memory.user.backend`, `shadowWriteMem0`, and the common `memory.user.mem0.*` provider fields
 - A dedicated command reference page with a left-side command list and right-side detail view for all chat slash commands, aliases, and usage
 - Hover help for every visual config field, so operators can inspect the effect of each option before saving
 - Every visual config field is marked directly as either `Hot reload` or `Requires restart`
