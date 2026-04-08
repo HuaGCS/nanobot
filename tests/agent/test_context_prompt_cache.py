@@ -90,6 +90,7 @@ def test_persona_prompt_uses_persona_overrides_and_memory(tmp_path: Path) -> Non
     (workspace / "SOUL.md").write_text("root soul", encoding="utf-8")
     (workspace / "USER.md").write_text("root user", encoding="utf-8")
     (workspace / "PROFILE.md").write_text("root profile", encoding="utf-8")
+    (workspace / "INSIGHTS.md").write_text("root insights", encoding="utf-8")
     (workspace / "memory").mkdir()
     (workspace / "memory" / "MEMORY.md").write_text("root memory", encoding="utf-8")
 
@@ -98,6 +99,7 @@ def test_persona_prompt_uses_persona_overrides_and_memory(tmp_path: Path) -> Non
     (persona_dir / "SOUL.md").write_text("coder soul", encoding="utf-8")
     (persona_dir / "USER.md").write_text("coder user", encoding="utf-8")
     (persona_dir / "PROFILE.md").write_text("coder profile", encoding="utf-8")
+    (persona_dir / "INSIGHTS.md").write_text("coder insights", encoding="utf-8")
     (persona_dir / "STYLE.md").write_text("coder style", encoding="utf-8")
     (persona_dir / "LORE.md").write_text("coder lore", encoding="utf-8")
     (persona_dir / "memory").mkdir()
@@ -112,11 +114,14 @@ def test_persona_prompt_uses_persona_overrides_and_memory(tmp_path: Path) -> Non
     assert "coder user" in prompt
     assert "# User Profile" in prompt
     assert "coder profile" in prompt
+    assert "# Collaboration Insights" in prompt
+    assert "coder insights" in prompt
     assert "coder style" in prompt
     assert "coder lore" in prompt
     assert "coder memory" in prompt
     assert "root memory" not in prompt
     assert "root profile" not in prompt
+    assert "root insights" not in prompt
 
 
 def test_system_prompt_loads_explicit_runtime_skills(tmp_path: Path) -> None:

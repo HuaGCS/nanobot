@@ -1091,6 +1091,7 @@ async def test_gateway_admin_persona_editor_updates_files(tmp_path: Path) -> Non
     assert "角色的核心设定、价值观和长期人格基调" in persona_page.text
     assert "角色对用户的默认态度、关系定位和互动边界" in persona_page.text
     assert "可选的长期用户画像" in persona_page.text
+    assert "可选的长期协作洞察" in persona_page.text
     assert "可选的语音/TTS 覆盖配置" in persona_page.text
     assert "可选的角色元数据" in persona_page.text
 
@@ -1103,6 +1104,7 @@ async def test_gateway_admin_persona_editor_updates_files(tmp_path: Path) -> Non
             "soul_md": "# Soul\n\nCalm and observant.",
             "user_md": "# User\n\nStay close.",
             "profile_md": "# Profile\n\nPrefers concise technical collaboration.",
+            "insights_md": "# Insights\n\nDo best with short iterative review loops.",
             "style_md": "# Style\n\nShort replies.",
             "lore_md": "",
             "voice_json": json.dumps({"provider": "edge", "edgeVoice": "zh-CN-XiaoyiNeural"}),
@@ -1117,6 +1119,9 @@ async def test_gateway_admin_persona_editor_updates_files(tmp_path: Path) -> Non
     assert (persona_dir / "USER.md").read_text(encoding="utf-8") == "# User\n\nStay close.\n"
     assert (persona_dir / "PROFILE.md").read_text(encoding="utf-8") == (
         "# Profile\n\nPrefers concise technical collaboration.\n"
+    )
+    assert (persona_dir / "INSIGHTS.md").read_text(encoding="utf-8") == (
+        "# Insights\n\nDo best with short iterative review loops.\n"
     )
     assert (persona_dir / "STYLE.md").read_text(encoding="utf-8") == "# Style\n\nShort replies.\n"
     assert not (persona_dir / "LORE.md").exists()

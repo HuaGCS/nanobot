@@ -14,6 +14,7 @@ def store(tmp_path):
     s.write_soul("# Soul\n- Helpful")
     s.write_user("# User\n- Developer")
     s.write_profile("# Profile\n- Likes concise answers")
+    s.write_insights("# Insights\n- Prefers short review cycles before large refactors")
     s.write_memory("# Memory\n- Project X active")
     return s
 
@@ -54,7 +55,7 @@ def _make_run_result(
 
 
 class TestDreamRun:
-    def test_registers_write_file_for_profile_creation(self, dream):
+    def test_registers_write_file_for_optional_layer_creation(self, dream):
         assert dream._tools.get("write_file") is not None
 
     async def test_noop_when_no_unprocessed_history(self, dream, mock_provider, mock_runner, store):
@@ -77,6 +78,12 @@ class TestDreamRun:
         spec = mock_runner.run.call_args[0][0]
         assert spec.max_iterations == 10
         assert spec.fail_on_tool_error is False
+        assert "## Current PROFILE.md" in spec.initial_messages[1]["content"]
+        assert "# Profile\n- Likes concise answers" in spec.initial_messages[1]["content"]
+        assert "## Current INSIGHTS.md" in spec.initial_messages[1]["content"]
+        assert "# Insights\n- Prefers short review cycles before large refactors" in (
+            spec.initial_messages[1]["content"]
+        )
 
     async def test_advances_dream_cursor(self, dream, mock_provider, mock_runner, store):
         """Dream should advance the cursor after processing."""

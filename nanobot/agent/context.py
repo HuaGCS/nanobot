@@ -26,6 +26,7 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     OPTIONAL_PERSONA_FILES = ["STYLE.md", "LORE.md"]
     PROFILE_FILE = "PROFILE.md"
+    INSIGHTS_FILE = "INSIGHTS.md"
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
 
@@ -76,6 +77,10 @@ class ContextBuilder:
         profile = self._read_persona_overlay_file(active_persona, self.PROFILE_FILE)
         if profile:
             parts.append(f"# User Profile\n\n{profile}")
+
+        insights = self._read_persona_overlay_file(active_persona, self.INSIGHTS_FILE)
+        if insights:
+            parts.append(f"# Collaboration Insights\n\n{insights}")
 
         memory = (
             self._memory_store(active_persona).get_memory_context()

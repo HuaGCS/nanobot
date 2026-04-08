@@ -42,6 +42,13 @@ class TestMemoryStoreBasicIO:
         store.write_profile("profile content")
         assert store.read_profile() == "profile content"
 
+    def test_read_insights_returns_empty_when_missing(self, store):
+        assert store.read_insights() == ""
+
+    def test_write_and_read_insights(self, store):
+        store.write_insights("insight content")
+        assert store.read_insights() == "insight content"
+
     def test_get_memory_context_returns_empty_when_missing(self, store):
         assert store.get_memory_context() == ""
 

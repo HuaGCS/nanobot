@@ -93,7 +93,7 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
 
 
 class MemoryStore:
-    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md, PROFILE.md."""
+    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md, PROFILE.md, INSIGHTS.md."""
 
     _DEFAULT_MAX_HISTORY = 1000
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
@@ -113,11 +113,12 @@ class MemoryStore:
         self.soul_file = workspace / "SOUL.md"
         self.user_file = workspace / "USER.md"
         self.profile_file = workspace / "PROFILE.md"
+        self.insights_file = workspace / "INSIGHTS.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._consecutive_failures = 0
         self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "PROFILE.md", "memory/MEMORY.md",
+            "SOUL.md", "USER.md", "PROFILE.md", "INSIGHTS.md", "memory/MEMORY.md",
         ])
         self._maybe_migrate_legacy_history()
 
@@ -294,6 +295,14 @@ class MemoryStore:
 
     def write_profile(self, content: str) -> None:
         self.profile_file.write_text(content, encoding="utf-8")
+
+    # -- INSIGHTS.md --------------------------------------------------------
+
+    def read_insights(self) -> str:
+        return self.read_file(self.insights_file)
+
+    def write_insights(self, content: str) -> None:
+        self.insights_file.write_text(content, encoding="utf-8")
 
     # -- context injection (used by context.py) ------------------------------
 
@@ -868,7 +877,7 @@ class Dream:
     Phase 1 produces an analysis summary (plain LLM call).
     Phase 2 delegates to AgentRunner with read_file / edit_file / write_file
     tools so the LLM can make targeted, incremental edits and create optional
-    profile layers without replacing entire files.
+    profile / insight layers without replacing entire files.
     """
 
     def __init__(
@@ -928,12 +937,14 @@ class Dream:
         current_soul = self.store.read_soul() or "(empty)"
         current_user = self.store.read_user() or "(empty)"
         current_profile = self.store.read_profile() or "(empty)"
+        current_insights = self.store.read_insights() or "(empty)"
         file_context = (
             f"## Current Date\n{current_date}\n\n"
             f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
             f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
             f"## Current USER.md ({len(current_user)} chars)\n{current_user}\n\n"
-            f"## Current PROFILE.md ({len(current_profile)} chars)\n{current_profile}"
+            f"## Current PROFILE.md ({len(current_profile)} chars)\n{current_profile}\n\n"
+            f"## Current INSIGHTS.md ({len(current_insights)} chars)\n{current_insights}"
         )
 
         # Phase 1: Analyze

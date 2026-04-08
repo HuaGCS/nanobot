@@ -1868,7 +1868,7 @@ The built-in admin UI currently covers:
 - A dedicated command reference page with a left-side command list and right-side detail view for all chat slash commands, aliases, and usage
 - Hover help for every visual config field, so operators can inspect the effect of each option before saving
 - Every visual config field is marked directly as either `Hot reload` or `Requires restart`
-- Persona file editing for the current runtime workspace: `SOUL.md`, `USER.md`, optional `PROFILE.md`, `STYLE.md`, `LORE.md`
+- Persona file editing for the current runtime workspace: `SOUL.md`, `USER.md`, optional `PROFILE.md`, optional `INSIGHTS.md`, `STYLE.md`, `LORE.md`
 - Persona-local `VOICE.json`
 - Persona-local `.nanobot/st_manifest.json`
 - Inline explanations in the persona detail editor, so each file block explains what it controls before you edit it
@@ -2099,7 +2099,7 @@ nanobot uses a layered memory system designed to stay light in the moment and du
 time.
 
 - `memory/history.jsonl` stores append-only summarized history
-- `SOUL.md`, `USER.md`, optional `PROFILE.md`, and `memory/MEMORY.md` store long-term knowledge managed by Dream
+- `SOUL.md`, `USER.md`, optional `PROFILE.md`, optional `INSIGHTS.md`, and `memory/MEMORY.md` store long-term knowledge managed by Dream
 - `Dream` runs on a schedule and can also be triggered manually
 - memory changes can be inspected and restored with built-in commands
 
@@ -2168,7 +2168,8 @@ The same manifest can also define `reference_image` and `reference_images`. When
 Persona workspaces can also include optional `STYLE.md` and `LORE.md`. When present, nanobot loads
 them into the persona system prompt after `SOUL.md` and `USER.md`. They can also include optional
 `PROFILE.md`, which is loaded as a separate user-profile layer for stable user facts and
-preferences instead of persona identity.
+preferences instead of persona identity, plus optional `INSIGHTS.md`, which stores learned
+collaboration guidance such as proven workflows, strategy notes, and recurring pitfalls.
 
 Import a SillyTavern preset into an existing persona:
 

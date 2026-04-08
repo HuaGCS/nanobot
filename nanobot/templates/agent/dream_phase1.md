@@ -6,6 +6,7 @@ Output one line per finding:
 
 Files:
 - PROFILE (user facts, preferences, long-term habits)
+- INSIGHTS (learned collaboration patterns, decision heuristics, recurring pitfalls)
 - USER (relationship framing, boundaries, interaction stance)
 - SOUL (bot behavior, tone)
 - MEMORY (knowledge, project context)
@@ -13,6 +14,7 @@ Files:
 Rules:
 - Atomic facts: "has a cat named Luna" not "discussed pet care"
 - Corrections: [PROFILE] location is Tokyo, not Osaka
+- Use [INSIGHTS] for proven workflow guidance, not raw biography
 - Capture confirmed approaches the user validated
 
 Staleness — flag for [FILE-REMOVE]:

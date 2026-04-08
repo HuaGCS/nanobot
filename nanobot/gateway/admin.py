@@ -2978,6 +2978,7 @@ def _persona_file_map(workspace: Path, persona: str) -> dict[str, Path]:
         "SOUL.md": root / "SOUL.md",
         "USER.md": root / "USER.md",
         "PROFILE.md": root / "PROFILE.md",
+        "INSIGHTS.md": root / "INSIGHTS.md",
         "STYLE.md": root / "STYLE.md",
         "LORE.md": root / "LORE.md",
         "VOICE.json": root / PERSONA_VOICE_FILENAME,
@@ -4962,6 +4963,7 @@ def _render_persona_detail_page(
         </div>
         <div class="editor-grid">
           {_editor_card("PROFILE.md", "admin_persona_profile_desc", "profile_md", values["PROFILE.md"])}
+          {_editor_card("INSIGHTS.md", "admin_persona_insights_desc", "insights_md", values["INSIGHTS.md"])}
           {_editor_card("STYLE.md", "admin_persona_style_desc", "style_md", values["STYLE.md"])}
         </div>
         <div class="editor-grid">
@@ -4995,6 +4997,7 @@ async def _admin_persona_page(request: web.Request) -> web.Response:
         "SOUL.md": _read_text(files["SOUL.md"]),
         "USER.md": _read_text(files["USER.md"]),
         "PROFILE.md": _read_text(files["PROFILE.md"]),
+        "INSIGHTS.md": _read_text(files["INSIGHTS.md"]),
         "STYLE.md": _read_text(files["STYLE.md"]),
         "LORE.md": _read_text(files["LORE.md"]),
         "VOICE.json": _read_json_text(files["VOICE.json"]),
@@ -5017,6 +5020,7 @@ async def _admin_persona_submit(request: web.Request) -> web.Response:
         "SOUL.md": str(form.get("soul_md", "")),
         "USER.md": str(form.get("user_md", "")),
         "PROFILE.md": str(form.get("profile_md", "")),
+        "INSIGHTS.md": str(form.get("insights_md", "")),
         "STYLE.md": str(form.get("style_md", "")),
         "LORE.md": str(form.get("lore_md", "")),
         "VOICE.json": str(form.get("voice_json", "")),
@@ -5028,6 +5032,7 @@ async def _admin_persona_submit(request: web.Request) -> web.Response:
         _write_text_file(files["SOUL.md"], values["SOUL.md"], optional=False)
         _write_text_file(files["USER.md"], values["USER.md"], optional=False)
         _write_text_file(files["PROFILE.md"], values["PROFILE.md"], optional=True)
+        _write_text_file(files["INSIGHTS.md"], values["INSIGHTS.md"], optional=True)
         _write_text_file(files["STYLE.md"], values["STYLE.md"], optional=True)
         _write_text_file(files["LORE.md"], values["LORE.md"], optional=True)
         _write_json_file(
