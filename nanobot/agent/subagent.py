@@ -20,6 +20,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
+from nanobot.utils.prompt_templates import render_template
 
 
 class _SubagentHook(AgentHook):

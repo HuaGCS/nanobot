@@ -10,7 +10,6 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.utils.helpers import (
@@ -21,6 +20,7 @@ from nanobot.utils.helpers import (
     maybe_persist_tool_result,
     truncate_text,
 )
+from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_finalization_retry_message,
@@ -41,6 +41,8 @@ _COMPACTABLE_TOOLS = frozenset({
     "web_search", "web_fetch", "list_dir",
 })
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
+
+
 @dataclass(slots=True)
 class AgentRunSpec:
     """Configuration for a single agent execution."""
@@ -237,6 +239,29 @@ class AgentRunner:
                 normalized = hook.normalize_content(context, response.content)
                 clean = hook.finalize_content(context, normalized)
 
+            if response.finish_reason == "length" and not is_blank_text(clean):
+                length_recovery_count += 1
+                if length_recovery_count <= _MAX_LENGTH_RECOVERIES:
+                    logger.info(
+                        "Output truncated on turn {} for {} ({}/{}); continuing",
+                        iteration,
+                        spec.session_key or "default",
+                        length_recovery_count,
+                        _MAX_LENGTH_RECOVERIES,
+                    )
+                    if hook.wants_streaming() and not stream_closed:
+                        await hook.on_stream_end(context, resuming=True)
+                    messages.append(build_assistant_message(
+                        normalized,
+                        reasoning_content=response.reasoning_content,
+                        thinking_blocks=response.thinking_blocks,
+                    ))
+                    messages.append(build_length_recovery_message())
+                    context.final_content = clean
+                    context.stop_reason = "length_recovery"
+                    await hook.after_iteration(context)
+                    continue
+
             if hook.wants_streaming() and not stream_closed:
                 await hook.on_stream_end(context, resuming=False)
             if response.finish_reason == "error":
@@ -421,7 +446,7 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -434,8 +459,8 @@ class AgentRunner:
                 "detail": "repeated external lookup blocked",
             }
             if spec.fail_on_tool_error:
-                return lookup_error + _HINT, event, RuntimeError(lookup_error)
-            return lookup_error + _HINT, event, None
+                return lookup_error + hint, event, RuntimeError(lookup_error)
+            return lookup_error + hint, event, None
         try:
             result = await spec.tools.execute(tool_call.name, tool_call.arguments)
         except asyncio.CancelledError:
@@ -457,8 +482,8 @@ class AgentRunner:
                 "detail": result.replace("\n", " ").strip()[:120],
             }
             if spec.fail_on_tool_error:
-                return result + _HINT, event, RuntimeError(result)
-            return result + _HINT, event, None
+                return result + hint, event, RuntimeError(result)
+            return result + hint, event, None
 
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
@@ -500,8 +525,6 @@ class AgentRunner:
         result: Any,
     ) -> Any:
         result = ensure_nonempty_tool_result(tool_name, result)
-        if isinstance(result, str):
-            return result
         try:
             content = maybe_persist_tool_result(
                 spec.workspace,
