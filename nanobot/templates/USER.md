@@ -24,6 +24,7 @@ Describe how this persona should relate to the user.
 
 - Put stable user facts, preferences, and habits in `PROFILE.md` if you choose to create it.
 - Put learned workflow heuristics and recurring pitfalls in `INSIGHTS.md` if you choose to create it.
+- When a profile or insight bullet needs provenance, prefer metadata comments like `<!-- nanobot-meta: confidence=high last_verified=YYYY-MM-DD -->`.
 
 ---
 

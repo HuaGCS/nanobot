@@ -15,8 +15,10 @@ Rules:
 - Atomic facts: "has a cat named Luna" not "discussed pet care"
 - Corrections: [PROFILE] location is Tokyo, not Osaka
 - Use [INSIGHTS] for proven workflow guidance, not raw biography
-- PROFILE: prefer directly stated facts or stable repeated preferences; if a useful detail is still tentative, keep only one canonical bullet and mark it with "(verify)"
+- PROFILE: prefer directly stated facts or stable repeated preferences; if a useful detail is still tentative, keep only one canonical bullet and prefer metadata like `<!-- nanobot-meta: confidence=low -->` instead of relying only on `(verify)`
 - INSIGHTS: keep only patterns validated by explicit user feedback or repeated successful turns; one-off hunches do not belong here
+- For PROFILE / INSIGHTS bullets, `confidence` should be `low`, `medium`, or `high`
+- When the current batch explicitly reconfirms a PROFILE / INSIGHTS bullet, preserve or add `last_verified=YYYY-MM-DD`
 - If new information contradicts an existing PROFILE or INSIGHTS bullet, replace the old bullet instead of keeping both versions
 - Prefer one canonical bullet per fact or pattern
 - Capture confirmed approaches the user validated

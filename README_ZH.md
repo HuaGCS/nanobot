@@ -1082,6 +1082,7 @@ nanobot 现在可以把 Mem0 作为真正的用户记忆后端使用。
 - 编辑当前 runtime workspace 下 persona 的 `SOUL.md`、`USER.md`、可选 `PROFILE.md`、可选 `INSIGHTS.md`、`STYLE.md`、`LORE.md`
 - 编辑 persona 的 `VOICE.json`
 - 编辑 persona 的 `.nanobot/st_manifest.json`
+- 在 persona 页面查看 `PROFILE.md` / `INSIGHTS.md` 的 metadata 摘要，包括结构化 `confidence` / `last_verified` 统计和遗留 `(verify)` 标记数量
 - 在 persona 页面提供旧版 `USER.md` 迁移预览/执行操作，先显示迁移后 `USER.md` / `PROFILE.md` / `INSIGHTS.md` 的实际内容，再把明显的用户画像内容拆到 `PROFILE.md`，把协作/工作方式提示拆到 `INSIGHTS.md`
 
 如果你在 admin 页面里改了 `agents.defaults.workspace`，当前 gateway 实例会在保存后立即切换到
@@ -1279,8 +1280,10 @@ manifest 中可声明：
 其中可选的 `PROFILE.md` 用来保存长期用户画像，例如稳定偏好、习惯和协作模式；它和 `USER.md` 不同，`USER.md` 仍然用于描述 persona 对用户的关系定位和互动边界。可选的 `INSIGHTS.md` 则用于沉淀长期协作洞察，例如被验证有效的工作方式、策略启发和反复出现的坑点。
 
 在记忆卫生上，`USER.md` 应继续只放关系定位；`PROFILE.md` 放稳定用户事实；`INSIGHTS.md`
-放被验证有效的协作规律。若某条记忆还不完全确定，优先保留一条带 `(verify)` 标记的规范条目，
-不要让多个互相冲突的版本同时存在。这两个可选文件默认不会在新 workspace 中预置，需要时再创建即可。
+放被验证有效的协作规律。若某条记忆还不完全确定，优先保留一条带结构化 metadata 的规范条目，
+例如 `<!-- nanobot-meta: confidence=low -->`；若当前批次明确重新确认了某条事实或规律，则补
+上 `last_verified=YYYY-MM-DD`。旧的 `(verify)` 标记仍然兼容，但新写入或被修改的条目应优先
+使用结构化 metadata，而不是自由文本后缀。这两个可选文件默认不会在新 workspace 中预置，需要时再创建即可。
 
 ### 聊天内斜杠命令
 

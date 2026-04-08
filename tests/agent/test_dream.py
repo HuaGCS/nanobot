@@ -14,8 +14,11 @@ def store(tmp_path):
     s = MemoryStore(tmp_path)
     s.write_soul("# Soul\n- Helpful")
     s.write_user("# User\n- Developer")
-    s.write_profile("# Profile\n- Likes concise answers")
-    s.write_insights("# Insights\n- Prefers short review cycles before large refactors")
+    s.write_profile(
+        "# Profile\n"
+        "- Likes concise answers <!-- nanobot-meta: confidence=high last_verified=2026-04-01 -->"
+    )
+    s.write_insights("# Insights\n- Prefers short review cycles before large refactors (verify)")
     s.write_memory("# Memory\n- Project X active")
     return s
 
@@ -60,10 +63,12 @@ class TestDreamRun:
         phase1 = render_template("agent/dream_phase1.md", strip=True)
         phase2 = render_template("agent/dream_phase2.md", strip=True)
 
-        assert 'mark it with "(verify)"' in phase1
+        assert "nanobot-meta: confidence=low" in phase1
+        assert "instead of relying only on `(verify)`" in phase1
         assert "replace the old bullet instead of keeping both versions" in phase1
         assert "Resolve contradictions by editing or deleting older bullets" in phase2
-        assert 'mark it once with "(verify)"' in phase2
+        assert "nanobot-meta: confidence=high last_verified=2026-04-08" in phase2
+        assert "Legacy `(verify)` markers may remain on untouched bullets" in phase2
 
     def test_registers_write_file_for_optional_layer_creation(self, dream):
         assert dream._tools.get("write_file") is not None
@@ -89,9 +94,18 @@ class TestDreamRun:
         assert spec.max_iterations == 10
         assert spec.fail_on_tool_error is False
         assert "## Current PROFILE.md" in spec.initial_messages[1]["content"]
-        assert "# Profile\n- Likes concise answers" in spec.initial_messages[1]["content"]
+        assert "nanobot-meta: confidence=high last_verified=2026-04-01" in (
+            spec.initial_messages[1]["content"]
+        )
+        assert "## PROFILE.md Metadata Summary" in spec.initial_messages[1]["content"]
+        assert "- Tagged bullets: 1" in spec.initial_messages[1]["content"]
+        assert "- Bullets with last_verified: 1" in spec.initial_messages[1]["content"]
         assert "## Current INSIGHTS.md" in spec.initial_messages[1]["content"]
-        assert "# Insights\n- Prefers short review cycles before large refactors" in (
+        assert "# Insights\n- Prefers short review cycles before large refactors (verify)" in (
+            spec.initial_messages[1]["content"]
+        )
+        assert "## INSIGHTS.md Metadata Summary" in spec.initial_messages[1]["content"]
+        assert "- Legacy (verify) markers: 1" in (
             spec.initial_messages[1]["content"]
         )
 

@@ -15,8 +15,9 @@ from loguru import logger
 
 from nanobot.agent.history_archive import HistoryArchiveStore
 from nanobot.agent.i18n import DEFAULT_LANGUAGE, resolve_language
+from nanobot.agent.memory_metadata import format_memory_metadata_summary
 from nanobot.agent.personas import DEFAULT_PERSONA, persona_workspace, resolve_persona_name
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
@@ -391,7 +392,7 @@ class MemoryStore:
                 read_size = min(size, 4096)
                 f.seek(size - read_size)
                 data = f.read().decode("utf-8")
-                lines = [l for l in data.split("\n") if l.strip()]
+                lines = [line for line in data.split("\n") if line.strip()]
                 if not lines:
                     return None
                 return json.loads(lines[-1])
@@ -942,13 +943,21 @@ class Dream:
         current_user = self.store.read_user() or "(empty)"
         current_profile = self.store.read_profile() or "(empty)"
         current_insights = self.store.read_insights() or "(empty)"
+        profile_metadata = format_memory_metadata_summary(
+            "" if current_profile == "(empty)" else current_profile
+        )
+        insights_metadata = format_memory_metadata_summary(
+            "" if current_insights == "(empty)" else current_insights
+        )
         file_context = (
             f"## Current Date\n{current_date}\n\n"
             f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
             f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
             f"## Current USER.md ({len(current_user)} chars)\n{current_user}\n\n"
             f"## Current PROFILE.md ({len(current_profile)} chars)\n{current_profile}\n\n"
-            f"## Current INSIGHTS.md ({len(current_insights)} chars)\n{current_insights}"
+            f"## PROFILE.md Metadata Summary\n{profile_metadata}\n\n"
+            f"## Current INSIGHTS.md ({len(current_insights)} chars)\n{current_insights}\n\n"
+            f"## INSIGHTS.md Metadata Summary\n{insights_metadata}"
         )
 
         # Phase 1: Analyze

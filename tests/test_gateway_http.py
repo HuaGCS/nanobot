@@ -1233,3 +1233,65 @@ async def test_gateway_admin_persona_migrates_legacy_user_md(tmp_path: Path) -> 
     assert "迁移完成" in migrated_page.text
     assert "PROFILE.md" in migrated_page.text
     assert "INSIGHTS.md" in migrated_page.text
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_persona_shows_memory_metadata_summary(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    config_path = tmp_path / "config.json"
+
+    config = Config()
+    config.gateway.admin.enabled = True
+    config.gateway.admin.auth_key = "secret-key"
+    save_config(config, config_path)
+
+    app = create_http_app(config_path=config_path, workspace=workspace)
+    login = await _call_route(
+        app,
+        "POST",
+        "/admin/login",
+        data={"auth_key": "secret-key", "next": "/admin"},
+    )
+    cookie = login.cookies["nanobot_admin_session"].value
+
+    create_resp = await _call_route(
+        app,
+        "POST",
+        "/admin/personas/new",
+        cookies={"nanobot_admin_session": cookie},
+        data={"name": "Aria"},
+    )
+    assert create_resp.status == 302
+
+    persona_dir = workspace / "personas" / "Aria"
+    (persona_dir / "PROFILE.md").write_text(
+        "# Profile\n\n"
+        "- Likes concise replies <!-- nanobot-meta: confidence=high last_verified=2026-04-01 -->\n"
+        "- Uses Arch Linux <!-- nanobot-meta: confidence=medium -->\n",
+        encoding="utf-8",
+    )
+    (persona_dir / "INSIGHTS.md").write_text(
+        "# Insights\n\n"
+        "- Prefer short iterative loops <!-- nanobot-meta: confidence=low -->\n"
+        "- Reconfirm risky assumptions with the user (verify)\n",
+        encoding="utf-8",
+    )
+
+    persona_page = await _call_route(
+        app,
+        "GET",
+        "/admin/personas/Aria",
+        cookies={"nanobot_admin_session": cookie},
+    )
+    assert persona_page.status == 200
+    assert "画像 / 洞察元信息" in persona_page.text
+    assert "PROFILE.md 元信息" in persona_page.text
+    assert "INSIGHTS.md 元信息" in persona_page.text
+    assert "示例 metadata 写法" in persona_page.text
+    assert "nanobot-meta: confidence=high last_verified=2026-04-08" in persona_page.text
+    assert re.search(r"已标记条目</span>\s*<strong>2</strong>", persona_page.text)
+    assert re.search(r"带 last_verified</span>\s*<strong>1</strong>", persona_page.text)
+    assert re.search(r"高置信度</span>\s*<strong>1</strong>", persona_page.text)
+    assert re.search(r"中置信度</span>\s*<strong>1</strong>", persona_page.text)
+    assert re.search(r"低置信度</span>\s*<strong>1</strong>", persona_page.text)
+    assert re.search(r"旧版 \(verify\)</span>\s*<strong>1</strong>", persona_page.text)

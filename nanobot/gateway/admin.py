@@ -23,6 +23,7 @@ from aiohttp import web
 
 from nanobot.agent.i18n import language_label, normalize_language_code
 from nanobot.agent.i18n import text as i18n_text
+from nanobot.agent.memory_metadata import summarize_memory_metadata
 from nanobot.agent.personas import (
     DEFAULT_PERSONA,
     PERSONA_METADATA_DIRNAME,
@@ -5148,6 +5149,46 @@ def _render_persona_detail_page(
             "</label>"
         )
 
+    def _memory_metadata_card(title: str, value: str) -> str:
+        summary = summarize_memory_metadata(value)
+        empty_hint = (
+            f'<div class="muted">{_th(request, "admin_persona_memory_metadata_empty")}</div>'
+            if summary.tagged_bullets == 0 and summary.legacy_verify_markers == 0
+            else ""
+        )
+        return f"""
+          <section class="card stack">
+            <strong>{escape(title)}</strong>
+            <div class="stat-grid">
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_persona_memory_metadata_tagged"))}</span>
+                <strong>{summary.tagged_bullets}</strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_persona_memory_metadata_last_verified"))}</span>
+                <strong>{summary.with_last_verified}</strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_persona_memory_metadata_legacy_verify"))}</span>
+                <strong>{summary.legacy_verify_markers}</strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_persona_memory_metadata_confidence_high"))}</span>
+                <strong>{summary.high_confidence}</strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_persona_memory_metadata_confidence_medium"))}</span>
+                <strong>{summary.medium_confidence}</strong>
+              </div>
+              <div class="stat-card">
+                <span>{escape(_t(request, "admin_persona_memory_metadata_confidence_low"))}</span>
+                <strong>{summary.low_confidence}</strong>
+              </div>
+            </div>
+            {empty_hint}
+          </section>
+        """
+
     preview_card = ""
     if migration_preview:
         result_title_keys = {
@@ -5201,6 +5242,21 @@ def _render_persona_detail_page(
           </section>
         """
 
+    metadata_card = f"""
+      <section class="card stack">
+        <div class="section-head">
+          <h2>{escape(_t(request, "admin_persona_memory_metadata_title"))}</h2>
+          <div class="muted">{_th(request, "admin_persona_memory_metadata_desc")}</div>
+        </div>
+        <div class="editor-grid">
+          {_memory_metadata_card(_t(request, "admin_persona_memory_metadata_profile_title"), values["PROFILE.md"])}
+          {_memory_metadata_card(_t(request, "admin_persona_memory_metadata_insights_title"), values["INSIGHTS.md"])}
+        </div>
+        <div class="muted">{_th(request, "admin_persona_memory_metadata_example_desc")}</div>
+        <pre class="code-block"><code>- Prefers short review loops. &lt;!-- nanobot-meta: confidence=high last_verified=2026-04-08 --&gt;</code></pre>
+      </section>
+    """
+
     body = f"""
       <div class="hero-grid">
         <div class="card stack spotlight">
@@ -5217,6 +5273,7 @@ def _render_persona_detail_page(
         </div>
       </div>
       {preview_card}
+      {metadata_card}
       <form method="post" action="/admin/personas/{escape(persona)}" class="stack" id="persona-form">
         <div class="editor-grid">
           {_editor_card("SOUL.md", "admin_persona_soul_desc", "soul_md", values["SOUL.md"])}

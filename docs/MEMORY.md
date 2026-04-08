@@ -97,7 +97,9 @@ The split between `USER.md`, `PROFILE.md`, and `INSIGHTS.md` only helps if the f
 - `USER.md` is not a biography file. Keep relationship framing and interaction boundaries there.
 - `PROFILE.md` is for stable user facts and preferences, not one-off guesses.
 - `INSIGHTS.md` is for learned collaboration guidance that proved useful over time, not every passing intuition.
-- When a remembered detail is tentative but still worth keeping, prefer one canonical bullet with `(verify)` over multiple competing bullets.
+- When a remembered detail is tentative but still worth keeping, prefer one canonical bullet with structured metadata such as `<!-- nanobot-meta: confidence=low -->` over multiple competing bullets.
+- When a fact or collaboration pattern is explicitly reconfirmed, add or update `last_verified=YYYY-MM-DD` on that bullet.
+- Legacy `(verify)` markers are still accepted as compatibility hints, but touched bullets should migrate toward structured metadata comments.
 - When a new fact or insight contradicts an older one, Dream should replace or remove the older bullet instead of letting both survive.
 
 ## Why `history.jsonl`

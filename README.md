@@ -1872,6 +1872,7 @@ The built-in admin UI currently covers:
 - Persona-local `VOICE.json`
 - Persona-local `.nanobot/st_manifest.json`
 - Inline explanations in the persona detail editor, so each file block explains what it controls before you edit it
+- A persona-page metadata summary for `PROFILE.md` / `INSIGHTS.md`, including structured `confidence` / `last_verified` counts and leftover legacy `(verify)` markers
 - A persona-page migration preview/action for older profile-style `USER.md` files, which shows the exact resulting `USER.md` / `PROFILE.md` / `INSIGHTS.md` content before splitting obvious user-profile content into `PROFILE.md` and workflow guidance into `INSIGHTS.md`
 
 If you change `agents.defaults.workspace` in the admin config editor, the current gateway instance
@@ -2106,8 +2107,10 @@ time.
 
 `USER.md` remains the persona-to-user relationship layer. Use optional `PROFILE.md` for stable user
 facts and preferences, and optional `INSIGHTS.md` for validated collaboration heuristics. When a
-remembered detail is tentative, prefer one canonical bullet with `(verify)` instead of keeping
-competing versions.
+remembered detail is tentative, prefer one canonical bullet with structured metadata such as
+`<!-- nanobot-meta: confidence=low -->`. When a fact or pattern is explicitly reconfirmed, add or
+update `last_verified=YYYY-MM-DD`. Legacy `(verify)` markers are still understood, but touched
+bullets should prefer structured metadata over free-form suffixes.
 
 If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
 
@@ -2177,8 +2180,10 @@ them into the persona system prompt after `SOUL.md` and `USER.md`. They can also
 preferences instead of persona identity, plus optional `INSIGHTS.md`, which stores learned
 collaboration guidance such as proven workflows, strategy notes, and recurring pitfalls. `USER.md`
 should stay focused on relationship framing; conflicting profile/insight bullets should be
-replaced rather than accumulated. These optional overlays are not seeded into a fresh workspace by
-default; create them when you actually need them.
+replaced rather than accumulated. For tentative or revalidated bullets, prefer structured metadata
+comments such as `<!-- nanobot-meta: confidence=medium last_verified=2026-04-08 -->` over raw
+`(verify)` suffixes. These optional overlays are not seeded into a fresh workspace by default;
+create them when you actually need them.
 
 Import a SillyTavern preset into an existing persona:
 
