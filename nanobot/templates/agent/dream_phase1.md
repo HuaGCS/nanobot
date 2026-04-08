@@ -4,11 +4,15 @@ Output one line per finding:
 [FILE] atomic fact (not already in memory)
 [FILE-REMOVE] reason for removal
 
-Files: USER (identity, preferences), SOUL (bot behavior, tone), MEMORY (knowledge, project context)
+Files:
+- PROFILE (user facts, preferences, long-term habits)
+- USER (relationship framing, boundaries, interaction stance)
+- SOUL (bot behavior, tone)
+- MEMORY (knowledge, project context)
 
 Rules:
 - Atomic facts: "has a cat named Luna" not "discussed pet care"
-- Corrections: [USER] location is Tokyo, not Osaka
+- Corrections: [PROFILE] location is Tokyo, not Osaka
 - Capture confirmed approaches the user validated
 
 Staleness — flag for [FILE-REMOVE]:

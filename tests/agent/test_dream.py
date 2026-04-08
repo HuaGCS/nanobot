@@ -1,8 +1,8 @@
 """Tests for the Dream class — two-phase memory consolidation via AgentRunner."""
 
-import pytest
-
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from nanobot.agent.memory import Dream, MemoryStore
 from nanobot.agent.runner import AgentRunResult
@@ -13,6 +13,7 @@ def store(tmp_path):
     s = MemoryStore(tmp_path)
     s.write_soul("# Soul\n- Helpful")
     s.write_user("# User\n- Developer")
+    s.write_profile("# Profile\n- Likes concise answers")
     s.write_memory("# Memory\n- Project X active")
     return s
 
@@ -53,6 +54,9 @@ def _make_run_result(
 
 
 class TestDreamRun:
+    def test_registers_write_file_for_profile_creation(self, dream):
+        assert dream._tools.get("write_file") is not None
+
     async def test_noop_when_no_unprocessed_history(self, dream, mock_provider, mock_runner, store):
         """Dream should not call LLM when there's nothing to process."""
         result = await dream.run()
@@ -94,4 +98,3 @@ class TestDreamRun:
         # After Dream, cursor is advanced and 3, compact keeps last max_history_entries
         entries = store.read_unprocessed_history(since_cursor=0)
         assert all(e["cursor"] > 0 for e in entries)
-

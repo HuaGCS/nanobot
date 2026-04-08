@@ -1,8 +1,7 @@
 """Tests for the restructured MemoryStore — pure file I/O layer."""
 
-from datetime import datetime
 import json
-from pathlib import Path
+from datetime import datetime
 
 import pytest
 
@@ -35,6 +34,13 @@ class TestMemoryStoreBasicIO:
     def test_write_and_read_user(self, store):
         store.write_user("user content")
         assert store.read_user() == "user content"
+
+    def test_read_profile_returns_empty_when_missing(self, store):
+        assert store.read_profile() == ""
+
+    def test_write_and_read_profile(self, store):
+        store.write_profile("profile content")
+        assert store.read_profile() == "profile content"
 
     def test_get_memory_context_returns_empty_when_missing(self, store):
         assert store.get_memory_context() == ""

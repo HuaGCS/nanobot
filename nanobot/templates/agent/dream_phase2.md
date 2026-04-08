@@ -5,12 +5,14 @@ Update memory files based on the analysis below.
 ## File paths (relative to workspace root)
 - SOUL.md
 - USER.md
+- PROFILE.md
 - memory/MEMORY.md
 
 Do NOT guess paths.
 
 ## Editing rules
 - Edit directly — file contents provided below, no read_file needed
+- If `PROFILE.md` is missing and you need it, create it with `write_file`
 - Use exact text as old_text, include surrounding blank lines for unique match
 - Batch changes to the same file into one edit_file call
 - For deletions: section header + all bullets as old_text, new_text empty

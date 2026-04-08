@@ -25,6 +25,7 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     OPTIONAL_PERSONA_FILES = ["STYLE.md", "LORE.md"]
+    PROFILE_FILE = "PROFILE.md"
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
 
@@ -71,6 +72,10 @@ class ContextBuilder:
         bootstrap = self._load_bootstrap_files(active_persona)
         if bootstrap:
             parts.append(bootstrap)
+
+        profile = self._read_persona_overlay_file(active_persona, self.PROFILE_FILE)
+        if profile:
+            parts.append(f"# User Profile\n\n{profile}")
 
         memory = (
             self._memory_store(active_persona).get_memory_context()
@@ -200,19 +205,21 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         """Return the memory store for the active persona."""
         return MemoryStore(persona_workspace(self.workspace, persona))
 
+    def _read_persona_overlay_file(self, persona: str, filename: str) -> str:
+        """Read a workspace file, preferring persona-local overrides when present."""
+        file_path = self.workspace / filename
+        persona_dir = None if persona == DEFAULT_PERSONA else personas_root(self.workspace) / persona
+        if persona_dir:
+            persona_file = persona_dir / filename
+            if persona_file.exists():
+                file_path = persona_file
+        return file_path.read_text(encoding="utf-8") if file_path.exists() else ""
+
     def _load_bootstrap_files(self, persona: str) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
-        persona_dir = None if persona == DEFAULT_PERSONA else personas_root(self.workspace) / persona
-
         for filename in [*self.BOOTSTRAP_FILES, *self.OPTIONAL_PERSONA_FILES]:
-            file_path = self.workspace / filename
-            if persona_dir:
-                persona_file = persona_dir / filename
-                if persona_file.exists():
-                    file_path = persona_file
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
+            if content := self._read_persona_overlay_file(persona, filename):
                 parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""

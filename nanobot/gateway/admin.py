@@ -2977,6 +2977,7 @@ def _persona_file_map(workspace: Path, persona: str) -> dict[str, Path]:
     return {
         "SOUL.md": root / "SOUL.md",
         "USER.md": root / "USER.md",
+        "PROFILE.md": root / "PROFILE.md",
         "STYLE.md": root / "STYLE.md",
         "LORE.md": root / "LORE.md",
         "VOICE.json": root / PERSONA_VOICE_FILENAME,
@@ -4960,10 +4961,11 @@ def _render_persona_detail_page(
           {_editor_card("USER.md", "admin_persona_user_desc", "user_md", values["USER.md"])}
         </div>
         <div class="editor-grid">
+          {_editor_card("PROFILE.md", "admin_persona_profile_desc", "profile_md", values["PROFILE.md"])}
           {_editor_card("STYLE.md", "admin_persona_style_desc", "style_md", values["STYLE.md"])}
-          {_editor_card("LORE.md", "admin_persona_lore_desc", "lore_md", values["LORE.md"])}
         </div>
         <div class="editor-grid">
+          {_editor_card("LORE.md", "admin_persona_lore_desc", "lore_md", values["LORE.md"])}
           {_editor_card("VOICE.json", "admin_persona_voice_desc", "voice_json", values["VOICE.json"])}
           {_editor_card("st_manifest.json", "admin_persona_manifest_desc", "manifest_json", values["st_manifest.json"])}
         </div>
@@ -4992,6 +4994,7 @@ async def _admin_persona_page(request: web.Request) -> web.Response:
     values = {
         "SOUL.md": _read_text(files["SOUL.md"]),
         "USER.md": _read_text(files["USER.md"]),
+        "PROFILE.md": _read_text(files["PROFILE.md"]),
         "STYLE.md": _read_text(files["STYLE.md"]),
         "LORE.md": _read_text(files["LORE.md"]),
         "VOICE.json": _read_json_text(files["VOICE.json"]),
@@ -5013,6 +5016,7 @@ async def _admin_persona_submit(request: web.Request) -> web.Response:
     values = {
         "SOUL.md": str(form.get("soul_md", "")),
         "USER.md": str(form.get("user_md", "")),
+        "PROFILE.md": str(form.get("profile_md", "")),
         "STYLE.md": str(form.get("style_md", "")),
         "LORE.md": str(form.get("lore_md", "")),
         "VOICE.json": str(form.get("voice_json", "")),
@@ -5023,6 +5027,7 @@ async def _admin_persona_submit(request: web.Request) -> web.Response:
         _ensure_persona_scaffold(_runtime_workspace(request), persona)
         _write_text_file(files["SOUL.md"], values["SOUL.md"], optional=False)
         _write_text_file(files["USER.md"], values["USER.md"], optional=False)
+        _write_text_file(files["PROFILE.md"], values["PROFILE.md"], optional=True)
         _write_text_file(files["STYLE.md"], values["STYLE.md"], optional=True)
         _write_text_file(files["LORE.md"], values["LORE.md"], optional=True)
         _write_json_file(

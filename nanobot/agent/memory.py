@@ -93,7 +93,7 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
 
 
 class MemoryStore:
-    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
+    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md, PROFILE.md."""
 
     _DEFAULT_MAX_HISTORY = 1000
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
@@ -112,11 +112,12 @@ class MemoryStore:
         self.legacy_history_file = self.memory_dir / "HISTORY.md"
         self.soul_file = workspace / "SOUL.md"
         self.user_file = workspace / "USER.md"
+        self.profile_file = workspace / "PROFILE.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._consecutive_failures = 0
         self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md",
+            "SOUL.md", "USER.md", "PROFILE.md", "memory/MEMORY.md",
         ])
         self._maybe_migrate_legacy_history()
 
@@ -285,6 +286,14 @@ class MemoryStore:
 
     def write_user(self, content: str) -> None:
         self.user_file.write_text(content, encoding="utf-8")
+
+    # -- PROFILE.md ----------------------------------------------------------
+
+    def read_profile(self) -> str:
+        return self.read_file(self.profile_file)
+
+    def write_profile(self, content: str) -> None:
+        self.profile_file.write_text(content, encoding="utf-8")
 
     # -- context injection (used by context.py) ------------------------------
 
@@ -854,11 +863,12 @@ MemoryConsolidator = Consolidator
 
 
 class Dream:
-    """Two-phase memory processor: analyze history.jsonl, then edit files via AgentRunner.
+    """Two-phase memory processor: analyze history.jsonl, then update files via AgentRunner.
 
     Phase 1 produces an analysis summary (plain LLM call).
-    Phase 2 delegates to AgentRunner with read_file / edit_file tools so the
-    LLM can make targeted, incremental edits instead of replacing entire files.
+    Phase 2 delegates to AgentRunner with read_file / edit_file / write_file
+    tools so the LLM can make targeted, incremental edits and create optional
+    profile layers without replacing entire files.
     """
 
     def __init__(
@@ -883,12 +893,13 @@ class Dream:
 
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
-        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
+        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
 
         tools = ToolRegistry()
         workspace = self.store.workspace
         tools.register(ReadFileTool(workspace=workspace, allowed_dir=workspace))
         tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
+        tools.register(WriteFileTool(workspace=workspace, allowed_dir=workspace))
         return tools
 
     # -- main entry ----------------------------------------------------------
@@ -916,11 +927,13 @@ class Dream:
         current_memory = self.store.read_memory() or "(empty)"
         current_soul = self.store.read_soul() or "(empty)"
         current_user = self.store.read_user() or "(empty)"
+        current_profile = self.store.read_profile() or "(empty)"
         file_context = (
             f"## Current Date\n{current_date}\n\n"
             f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
             f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
-            f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
+            f"## Current USER.md ({len(current_user)} chars)\n{current_user}\n\n"
+            f"## Current PROFILE.md ({len(current_profile)} chars)\n{current_profile}"
         )
 
         # Phase 1: Analyze
@@ -947,7 +960,7 @@ class Dream:
             logger.exception("Dream Phase 1 failed")
             return False
 
-        # Phase 2: Delegate to AgentRunner with read_file / edit_file
+        # Phase 2: Delegate to AgentRunner with read_file / edit_file / write_file
         phase2_prompt = f"## Analysis Result\n{analysis}\n\n{file_context}"
 
         tools = self._tools

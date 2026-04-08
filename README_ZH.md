@@ -1079,7 +1079,7 @@ nanobot 现在可以把 Mem0 作为真正的用户记忆后端使用。
 - 独立的命令总览页，展示所有聊天 slash 命令、别名和用法
 - 每个可视化配置项都带悬浮说明，鼠标移动到字段名即可查看详细解释
 - 每个可视化配置项都会直接标注“可热重载”或“需重启”
-- 编辑当前 runtime workspace 下 persona 的 `SOUL.md`、`USER.md`、`STYLE.md`、`LORE.md`
+- 编辑当前 runtime workspace 下 persona 的 `SOUL.md`、`USER.md`、可选 `PROFILE.md`、`STYLE.md`、`LORE.md`
 - 编辑 persona 的 `VOICE.json`
 - 编辑 persona 的 `.nanobot/st_manifest.json`
 
@@ -1261,6 +1261,7 @@ nanobot persona import-st-worldinfo /path/to/worldinfo.json --persona Aria -w <w
 personas/Aria/
   SOUL.md
   USER.md
+  PROFILE.md  # optional
   STYLE.md
   LORE.md
   memory/
@@ -1272,6 +1273,8 @@ manifest 中可声明：
 - `response_filter_tags`
 - `reference_image`
 - `reference_images`
+
+其中可选的 `PROFILE.md` 用来保存长期用户画像，例如稳定偏好、习惯和协作模式；它和 `USER.md` 不同，`USER.md` 仍然用于描述 persona 对用户的关系定位和互动边界。
 
 ### 聊天内斜杠命令
 
