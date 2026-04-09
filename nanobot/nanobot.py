@@ -87,6 +87,7 @@ class Nanobot:
             mcp_servers=config.tools.mcp_servers,
             channels_config=config.channels,
             timezone=defaults.timezone,
+            unified_session=defaults.unified_session,
         )
         return cls(loop)
 
