@@ -98,13 +98,19 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        loop._schedule_background(
-            loop.memory_consolidator.archive_messages(
-                session,
-                snapshot,
-                source="new_session",
-            )
-        )
+        consolidator = getattr(loop, "memory_consolidator", None) or getattr(loop, "consolidator", None)
+        archive_coro = None
+        if consolidator is not None:
+            if hasattr(consolidator, "archive_messages"):
+                archive_coro = consolidator.archive_messages(
+                    session,
+                    snapshot,
+                    source="new_session",
+                )
+            elif hasattr(consolidator, "archive"):
+                archive_coro = consolidator.archive(snapshot)
+        if archive_coro is not None:
+            loop._schedule_background(archive_coro)
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",

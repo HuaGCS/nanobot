@@ -604,7 +604,8 @@ class Consolidator:
         max_completion_tokens: int = 4096,
     ):
         self.store = store
-        self.workspace = store.workspace
+        workspace = getattr(store, "workspace", None)
+        self.workspace = workspace if isinstance(workspace, Path) else Path.cwd()
         self.provider = provider
         self.model = model
         self.sessions = sessions
