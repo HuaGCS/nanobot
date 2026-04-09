@@ -94,6 +94,7 @@ class _LoopHook(AgentHook):
         chat_id: str = "direct",
         message_id: str | None = None,
     ) -> None:
+        super().__init__(reraise=True)
         self._loop = agent_loop
         self._on_progress = on_progress
         self._on_stream = on_stream
@@ -1348,7 +1349,7 @@ class AgentLoop:
 
         loop_hook = _LoopHook()
         hook: AgentHook = (
-            _LoopHookChain(loop_hook, self._extra_hooks)
+            CompositeHook([loop_hook] + self._extra_hooks)
             if self._extra_hooks
             else loop_hook
         )

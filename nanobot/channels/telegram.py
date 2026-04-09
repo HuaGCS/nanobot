@@ -169,6 +169,7 @@ def _markdown_to_telegram_html(text: str) -> str:
 
 _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
+_STREAM_EDIT_INTERVAL_DEFAULT = 0.6  # min seconds between edit_message_text calls
 
 
 @dataclass
@@ -209,8 +210,6 @@ class TelegramChannel(BaseChannel):
     @classmethod
     def default_config(cls) -> dict[str, object]:
         return TelegramConfig().model_dump(by_alias=True)
-
-    _STREAM_EDIT_INTERVAL = 0.6  # min seconds between edit_message_text calls
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
@@ -621,7 +620,7 @@ class TelegramChannel(BaseChannel):
             except Exception as e:
                 logger.warning("Stream initial send failed: {}", e)
                 raise  # Let ChannelManager handle retry
-        elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
+        elif (now - buf.last_edit) >= self.config.stream_edit_interval:
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
