@@ -1299,6 +1299,7 @@ class AgentLoop:
 
         class _LoopHook(AgentHook):
             def __init__(self) -> None:
+                super().__init__(reraise=True)
                 self._stream_buf = ""
 
             def wants_streaming(self) -> bool:

@@ -288,7 +288,8 @@ async def test_large_tool_results_are_compacted_before_next_llm_call(tmp_path, m
     assert len(tool_messages) == 1
     assert isinstance(tool_messages[0]["content"], str)
     assert len(tool_messages[0]["content"]) < 40_000
-    assert "truncated" in tool_messages[0]["content"] or "omitted" in tool_messages[0]["content"]
+    assert "[tool output persisted]" in tool_messages[0]["content"]
+    assert "Preview:" in tool_messages[0]["content"]
 
     estimated, _ = provider.estimate_prompt_tokens(
         captured_second_call,
@@ -379,11 +380,15 @@ async def test_multi_step_tool_turn_keeps_memory_and_recent_context(tmp_path, mo
     newer_tool = next(msg for msg in third_tool_messages if msg.get("name") == "scan_repo")
     assert isinstance(older_tool["content"], str)
     assert isinstance(newer_tool["content"], str)
-    assert older_tool["content"].startswith("TOOL_A:")
-    assert newer_tool["content"].startswith("TOOL_B:")
-    assert len(second_tool_messages[0]["content"]) > 25_000
-    assert len(older_tool["content"]) < len(second_tool_messages[0]["content"])
-    assert len(older_tool["content"]) < len(newer_tool["content"])
+    assert "[tool output persisted]" in second_tool_messages[0]["content"]
+    assert "[tool output persisted]" in older_tool["content"]
+    assert "[tool output persisted]" in newer_tool["content"]
+    assert "TOOL_A:" in second_tool_messages[0]["content"]
+    assert "TOOL_A:" in older_tool["content"]
+    assert "TOOL_B:" in newer_tool["content"]
+    assert len(second_tool_messages[0]["content"]) < 5_000
+    assert len(older_tool["content"]) < 5_000
+    assert len(newer_tool["content"]) < 5_000
 
     assistant_tool_turns = [
         msg for msg in third_call

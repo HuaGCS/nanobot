@@ -10,6 +10,7 @@ import secrets
 import string
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import json_repair
@@ -794,9 +795,14 @@ class OpenAICompatProvider(LLMProvider):
             "error_should_retry": should_retry,
         }
 
-    @staticmethod
-    def _handle_error(e: Exception) -> LLMResponse:
-        return OpenAICompatProvider._error_response(e)
+    @classmethod
+    def _handle_error(cls, e: Exception) -> LLMResponse:
+        response = cls._error_response(e)
+        metadata = cls._extract_error_metadata(e)
+        retry_after = metadata.get("error_retry_after_s")
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(response.content)
+        return replace(response, retry_after=retry_after, **metadata)
 
     # ------------------------------------------------------------------
     # Public API

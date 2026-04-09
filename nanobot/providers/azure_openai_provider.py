@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -114,7 +115,14 @@ class AzureOpenAIProvider(LLMProvider):
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        return AzureOpenAIProvider._error_response(e, prefix="Error calling Azure OpenAI")
+        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+
+        response = AzureOpenAIProvider._error_response(e, prefix="Error calling Azure OpenAI")
+        metadata = OpenAICompatProvider._extract_error_metadata(e)
+        retry_after = metadata.get("error_retry_after_s")
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(response.content)
+        return replace(response, retry_after=retry_after, **metadata)
 
     # ------------------------------------------------------------------
     # Public API

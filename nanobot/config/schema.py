@@ -63,6 +63,7 @@ class TelegramConfig(Base):
     connection_pool_size: int = 32  # Outbound Telegram API HTTP pool size
     pool_timeout: float = 5.0  # Shared HTTP pool timeout for bot sends and getUpdates
     streaming: bool = True  # Progressive edit-based streaming for final text replies
+    stream_edit_interval: float = 1.0  # Minimum seconds between incremental stream edits
 
 
 class TelegramInstanceConfig(TelegramConfig):
@@ -338,6 +339,7 @@ class QQConfig(Base):
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids
+    ack_message: str = ""
     msg_format: Literal["plain", "markdown"] = "plain"
     media_dir: str = ""
     download_chunk_size: int = 1024 * 256

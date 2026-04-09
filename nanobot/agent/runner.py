@@ -51,7 +51,7 @@ class AgentRunSpec:
     tools: ToolRegistry
     model: str
     max_iterations: int
-    max_tool_result_chars: int
+    max_tool_result_chars: int = 16_000
     temperature: float | None = None
     max_tokens: int | None = None
     reasoning_effort: str | None = None

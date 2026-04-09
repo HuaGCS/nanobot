@@ -464,6 +464,14 @@ class QQChannel(BaseChannel):
                 )
                 user_id = chat_id
                 self._chat_type_cache[chat_id] = "c2c"
+            msg_type = self._chat_type_cache[chat_id]
+
+            ack_message = (self.config.ack_message or "").strip()
+            if ack_message:
+                try:
+                    await self._post_text_message(chat_id, msg_type, ack_message, data.id)
+                except Exception as exc:
+                    logger.warning("Failed to send QQ ack message for {}: {}", chat_id, exc)
 
             content = (data.content or "").strip()
             attachments = getattr(data, "attachments", None) or []

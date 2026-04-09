@@ -9,8 +9,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Literal
 
-from filelock import FileLock
 from loguru import logger
+
+try:
+    from filelock import FileLock
+except ImportError:
+    class FileLock:  # type: ignore[no-redef]
+        """Best-effort fallback when optional filelock is unavailable."""
+
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def __enter__(self) -> "FileLock":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
 
 from nanobot.cron.types import (
     CronJob,

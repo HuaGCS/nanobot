@@ -351,7 +351,7 @@ class TestSubagentCancellation:
         assert "Completed steps:" in args[3]
         assert "- list_dir: first result" in args[3]
         assert "Failure:" in args[3]
-        assert "- list_dir: boom" in args[3]
+        assert "- list_dir: Error executing list_dir: boom" in args[3]
         assert args[5] == "error"
 
     @pytest.mark.asyncio
