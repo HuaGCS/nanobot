@@ -45,7 +45,7 @@ async def test_run_agent_loop_filters_visible_output_but_preserves_history_conte
         return_value=LLMResponse(content="Hi <inner>private</inner> there", tool_calls=[]),
     )
 
-    final_content, _, messages = await loop._run_agent_loop([], persona="coder")
+    final_content, _, messages, _ = await loop._run_agent_loop([], persona="coder")
 
     assert final_content == "Hi there"
     assistant_messages = [message for message in messages if message.get("role") == "assistant"]
@@ -68,7 +68,7 @@ async def test_streaming_hides_filtered_persona_tags(tmp_path: Path) -> None:
     async def on_stream(delta: str) -> None:
         streamed.append(delta)
 
-    final_content, _, _ = await loop._run_agent_loop(
+    final_content, _, _, _ = await loop._run_agent_loop(
         [],
         persona="coder",
         on_stream=on_stream,

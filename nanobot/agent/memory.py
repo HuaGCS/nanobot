@@ -809,7 +809,12 @@ class Consolidator:
 
         lock = self.get_lock(session.key)
         async with lock:
-            budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+            max_completion_tokens = (
+                self.max_completion_tokens
+                if isinstance(self.max_completion_tokens, int)
+                else 4096
+            )
+            budget = self.context_window_tokens - max_completion_tokens - self._SAFETY_BUFFER
             target = budget // 2
             estimated, source = self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
