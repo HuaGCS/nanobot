@@ -64,7 +64,29 @@ class DiscordChannel(BaseChannel):
         try:
             intents = discord.Intents.none()
             intents.value = self.config.intents
-            self._client = DiscordBotClient(self, intents=intents)
+
+            proxy_auth = None
+            has_user = bool(self.config.proxy_username)
+            has_pass = bool(self.config.proxy_password)
+            if has_user and has_pass:
+                import aiohttp
+
+                proxy_auth = aiohttp.BasicAuth(
+                    login=self.config.proxy_username,
+                    password=self.config.proxy_password,
+                )
+            elif has_user != has_pass:
+                logger.warning(
+                    "Discord proxy auth incomplete: both proxy_username and "
+                    "proxy_password must be set; ignoring partial credentials",
+                )
+
+            self._client = DiscordBotClient(
+                self,
+                intents=intents,
+                proxy=self.config.proxy,
+                proxy_auth=proxy_auth,
+            )
         except Exception as e:
             logger.error("Failed to initialize Discord client: {}", e)
             self._client = None
@@ -107,7 +129,9 @@ class DiscordChannel(BaseChannel):
                 await self._stop_typing(msg.chat_id)
                 await self._clear_reactions(msg.chat_id)
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    async def send_delta(
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Progressive Discord delivery: send once, then edit until the stream ends."""
         client = self._client
         if client is None or not client.is_ready():
@@ -127,7 +151,9 @@ class DiscordChannel(BaseChannel):
             return
 
         buf = self._stream_bufs.get(chat_id)
-        if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
+        if buf is None or (
+            stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id
+        ):
             buf = _StreamBuf(stream_id=stream_id)
             self._stream_bufs[chat_id] = buf
         elif buf.stream_id is None:
@@ -306,7 +332,11 @@ class DiscordChannel(BaseChannel):
     @staticmethod
     def _build_inbound_metadata(message: discord.Message) -> dict[str, str | None]:
         """Build metadata for inbound Discord messages."""
-        reply_to = str(message.reference.message_id) if message.reference and message.reference.message_id else None
+        reply_to = (
+            str(message.reference.message_id)
+            if message.reference and message.reference.message_id
+            else None
+        )
         return {
             "message_id": str(message.id),
             "guild_id": str(message.guild.id) if message.guild else None,
@@ -321,7 +351,9 @@ class DiscordChannel(BaseChannel):
         if self.config.group_policy == "mention":
             bot_user_id = self._bot_user_id
             if bot_user_id is None:
-                logger.debug("Discord message in {} ignored (bot identity unavailable)", message.channel.id)
+                logger.debug(
+                    "Discord message in {} ignored (bot identity unavailable)", message.channel.id
+                )
                 return False
 
             if any(str(user.id) == bot_user_id for user in message.mentions):
@@ -362,7 +394,6 @@ class DiscordChannel(BaseChannel):
             await task
         except asyncio.CancelledError:
             pass
-
 
     async def _clear_reactions(self, chat_id: str) -> None:
         """Remove all pending reactions after bot replies."""

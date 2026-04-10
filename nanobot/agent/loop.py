@@ -986,6 +986,7 @@ class AgentLoop:
                 restrict_to_workspace=self.restrict_to_workspace,
                 sandbox=self.exec_config.sandbox,
                 path_append=self.exec_config.path_append,
+                allowed_env_keys=self.exec_config.allowed_env_keys,
             ))
         self.tools.register(
             WebSearchTool(
@@ -1767,7 +1768,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, stop_reason = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
