@@ -121,7 +121,7 @@ class AgentRunner:
                     exc,
                 )
                 messages_for_model = messages
-            context = AgentHookContext(iteration=iteration, messages=messages)
+            context = AgentHookContext(iteration=iteration, messages=messages_for_model)
             await hook.before_iteration(context)
             tool_definitions = spec.tools.get_definitions()
             request_messages = hook.prepare_messages(context, tool_definitions)
@@ -146,6 +146,7 @@ class AgentRunner:
                 )
                 messages.append(assistant_message)
                 tools_used.extend(tc.name for tc in response.tool_calls)
+                context.messages = messages
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -176,6 +177,7 @@ class AgentRunner:
                     context.final_content = final_content
                     context.error = error
                     context.stop_reason = stop_reason
+                    context.messages = messages
                     await hook.after_iteration(context)
                     break
                 completed_tool_results: list[dict[str, Any]] = []
@@ -206,6 +208,7 @@ class AgentRunner:
                 )
                 empty_content_retries = 0
                 length_recovery_count = 0
+                context.messages = messages
                 await hook.after_iteration(context)
                 continue
 
@@ -265,6 +268,7 @@ class AgentRunner:
                     messages.append(build_length_recovery_message())
                     context.final_content = clean
                     context.stop_reason = "length_recovery"
+                    context.messages = messages
                     await hook.after_iteration(context)
                     continue
 
@@ -278,6 +282,7 @@ class AgentRunner:
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
+                context.messages = messages
                 await hook.after_iteration(context)
                 break
             if is_blank_text(clean):
@@ -288,6 +293,7 @@ class AgentRunner:
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
+                context.messages = messages
                 await hook.after_iteration(context)
                 break
 
@@ -310,6 +316,7 @@ class AgentRunner:
             final_content = clean
             context.final_content = final_content
             context.stop_reason = stop_reason
+            context.messages = messages
             await hook.after_iteration(context)
             break
         else:

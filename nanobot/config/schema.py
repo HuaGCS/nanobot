@@ -91,6 +91,8 @@ class FeishuConfig(Base):
     react_emoji: str = (
         "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
     )
+    done_emoji: str = ""  # Optional completion emoji added after removing react_emoji
+    tool_hint_prefix: str = "🔧"  # Prefix for inline tool hints in streaming cards
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned, "open" responds to all
     reply_to_message: bool = False  # If true, replies quote the original Feishu message
     streaming: bool = True  # Progressive edit-based streaming for final text replies

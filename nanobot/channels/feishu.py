@@ -1260,9 +1260,9 @@ class FeishuChannel(BaseChannel):
         if meta.get("_stream_end"):
             if (message_id := meta.get("message_id")) and (reaction_id := meta.get("reaction_id")):
                 await self._remove_reaction(message_id, reaction_id)
-                # Add completion emoji if configured
-                if self.config.done_emoji and message_id:
-                    await self._add_reaction(message_id, self.config.done_emoji)
+                done_emoji = getattr(self.config, "done_emoji", "")
+                if done_emoji:
+                    await self._add_reaction(message_id, done_emoji)
 
             resuming = meta.get("_resuming", False)
             if resuming:
@@ -1272,8 +1272,8 @@ class FeishuChannel(BaseChannel):
                 buf = self._stream_bufs.get(chat_id)
                 if buf and buf.card_id and buf.text:
                     buf.sequence += 1
-                    await loop.run_in_executor(
-                        None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
+                    await self._run_blocking(
+                        self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
                     )
                 return
 
@@ -1332,10 +1332,21 @@ class FeishuChannel(BaseChannel):
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
 
             if msg.metadata.get("_tool_hint"):
-                if msg.content and msg.content.strip():
-                    await self._send_tool_hint_card(
-                        receive_id_type, msg.chat_id, msg.content.strip(),
-                    )
+                hint = (msg.content or "").strip()
+                if not hint:
+                    return
+                buf = self._stream_bufs.get(msg.chat_id)
+                if buf and buf.card_id:
+                    prefix = getattr(self.config, "tool_hint_prefix", "🔧")
+                    lines = self.__class__._format_tool_hint_lines(hint).split("\n")
+                    delta = "\n\n" + "\n".join(
+                        f"{prefix} {line}" for line in lines if line.strip()
+                    ) + "\n\n"
+                    await self.send_delta(msg.chat_id, delta)
+                    return
+                await self._send_tool_hint_card(
+                    receive_id_type, msg.chat_id, hint,
+                )
                 return
 
             reply_message_id: str | None = None

@@ -1857,7 +1857,7 @@ class AgentLoop:
 
             if block.get("type") == "text" and isinstance(block.get("text"), str):
                 text = block["text"]
-                if truncate_text and len(text) > self.max_tool_result_chars:
+                if should_truncate_text and len(text) > self.max_tool_result_chars:
                     text = truncate_text_value(text, self.max_tool_result_chars)
                 filtered.append({**block, "text": text})
                 continue
