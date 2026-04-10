@@ -1242,7 +1242,15 @@ class FeishuChannel(BaseChannel):
     async def send_delta(
         self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
     ) -> None:
-        """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent."""
+        """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
+
+        Supported metadata keys:
+            _stream_end: Finalize the streaming card.
+            _resuming:   Mid-turn pause – flush but keep the buffer alive.
+            _tool_hint:  Delta is a formatted tool hint (for display only).
+            message_id:  Original message id (used with _stream_end for reaction cleanup).
+            reaction_id: Reaction id to remove on stream end.
+        """
         if not self._client:
             return
         meta = metadata or {}
@@ -1252,6 +1260,22 @@ class FeishuChannel(BaseChannel):
         if meta.get("_stream_end"):
             if (message_id := meta.get("message_id")) and (reaction_id := meta.get("reaction_id")):
                 await self._remove_reaction(message_id, reaction_id)
+                # Add completion emoji if configured
+                if self.config.done_emoji and message_id:
+                    await self._add_reaction(message_id, self.config.done_emoji)
+
+            resuming = meta.get("_resuming", False)
+            if resuming:
+                # Mid-turn pause (e.g. tool call between streaming segments).
+                # Flush current text to card but keep the buffer alive so the
+                # next segment appends to the same card.
+                buf = self._stream_bufs.get(chat_id)
+                if buf and buf.card_id and buf.text:
+                    buf.sequence += 1
+                    await loop.run_in_executor(
+                        None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
+                    )
+                return
 
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
