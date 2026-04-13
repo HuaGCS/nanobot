@@ -25,6 +25,16 @@ _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
 
 
+def _resolve_host_infos(
+    hostname: str,
+    port: int | None,
+    family: int = socket.AF_UNSPEC,
+    type_: int = socket.SOCK_STREAM,
+):
+    """Thin wrapper around socket.getaddrinfo for test-safe patching."""
+    return socket.getaddrinfo(hostname, port, family, type_)
+
+
 def configure_ssrf_whitelist(cidrs: list[str]) -> None:
     """Allow specific CIDR ranges to bypass SSRF blocking (e.g. Tailscale's 100.64.0.0/10)."""
     global _allowed_networks
@@ -63,7 +73,7 @@ def validate_url_target(url: str) -> tuple[bool, str]:
         return False, "Missing hostname"
 
     try:
-        infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        infos = _resolve_host_infos(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
     except socket.gaierror:
         return False, f"Cannot resolve hostname: {hostname}"
 
@@ -96,7 +106,7 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
     except ValueError:
         # hostname is a domain name, resolve it
         try:
-            infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            infos = _resolve_host_infos(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror:
             return True, ""
         for info in infos:

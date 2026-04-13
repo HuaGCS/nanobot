@@ -890,7 +890,8 @@ Uses **WebSocket** long connection — no public IP required.
       "reactEmoji": "OnIt",
       "doneEmoji": "DONE",
       "toolHintPrefix": "🔧",
-      "streaming": true
+      "streaming": true,
+      "domain": "feishu"
     }
   }
 }
@@ -903,6 +904,7 @@ Uses **WebSocket** long connection — no public IP required.
 > `reactEmoji`: Emoji for "processing" status (default: `OnIt`). See [available emojis](https://open.larkoffice.com/document/server-docs/im-v1/message-reaction/emojis-introduce).
 > `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
 > `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`).
+> `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
 
 **3. Run**
 
@@ -1953,6 +1955,35 @@ Main-agent example:
 ```
 
 
+### Auto Compact
+
+When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "idleCompactAfterMinutes": 15
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.idleCompactAfterMinutes` | `0` (disabled) | Minutes of idle time before auto-compaction starts. Set to `0` to disable. Recommended: `15` — close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
+
+`sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
+
+How it works:
+1. **Idle detection**: On each idle tick (~1 s), checks all sessions for expiration.
+2. **Background compaction**: Idle sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
+3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
+4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
+
+> [!TIP]
+> Think of auto compact as "summarize older context, keep the freshest live turns." It is not a hard session reset.
+
 ### Timezone
 
 Time is context. Context should be precise.
@@ -2000,6 +2031,26 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 | Existing `session_key_override` (e.g. Telegram thread) | Respected | Still respected — not overwritten |
 
 > This is designed for single-user, multi-device setups. It is **off by default** — existing users see zero behavior change.
+
+### Disabled Skills
+
+nanobot ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "disabledSkills": ["github", "weather"]
+    }
+  }
+}
+```
+
+Disabled skills are excluded from the main agent's skill summary, from always-on skill injection, and from subagent skill summaries. This is useful when some bundled skills are unnecessary for your deployment or should not be exposed to end users.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
 
 ## 🧩 Multiple Instances
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -26,6 +27,21 @@ except ImportError:
     HAS_AIOHTTP = False
 
 pytest_plugins = ("pytest_asyncio",)
+
+
+def _local_tcp_available() -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+        return True
+    except OSError:
+        return False
+
+
+REQUIRES_AIOHTTP_SERVER = pytest.mark.skipif(
+    not HAS_AIOHTTP or not _local_tcp_available(),
+    reason="aiohttp unavailable or sandbox blocks local TCP sockets",
+)
 
 
 def _make_mock_agent(response_text: str = "mock response") -> MagicMock:
@@ -80,7 +96,7 @@ def test_chat_completion_response() -> None:
     assert result["id"].startswith("chatcmpl-")
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_missing_messages_returns_400(aiohttp_client, app) -> None:
     client = await aiohttp_client(app)
@@ -88,7 +104,7 @@ async def test_missing_messages_returns_400(aiohttp_client, app) -> None:
     assert resp.status == 400
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_no_user_message_returns_400(aiohttp_client, app) -> None:
     client = await aiohttp_client(app)
@@ -99,7 +115,7 @@ async def test_no_user_message_returns_400(aiohttp_client, app) -> None:
     assert resp.status == 400
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_stream_true_returns_400(aiohttp_client, app) -> None:
     client = await aiohttp_client(app)
@@ -179,7 +195,7 @@ async def test_single_user_message_must_have_user_role() -> None:
     assert "single user message" in body["error"]["message"].lower()
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_successful_request_uses_fixed_api_session(aiohttp_client, mock_agent) -> None:
     app = create_app(mock_agent, model_name="test-model")
@@ -200,7 +216,7 @@ async def test_successful_request_uses_fixed_api_session(aiohttp_client, mock_ag
     )
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
     call_log: list[str] = []
@@ -231,7 +247,7 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
     assert call_log == [API_SESSION_KEY, API_SESSION_KEY]
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     order: list[str] = []
@@ -266,7 +282,7 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
         assert order.index("end:second") < order.index("start:first")
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_models_endpoint(aiohttp_client, app) -> None:
     client = await aiohttp_client(app)
@@ -277,7 +293,7 @@ async def test_models_endpoint(aiohttp_client, app) -> None:
     assert body["data"][0]["id"] == "test-model"
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_health_endpoint(aiohttp_client, app) -> None:
     client = await aiohttp_client(app)
@@ -287,7 +303,7 @@ async def test_health_endpoint(aiohttp_client, app) -> None:
     assert body["status"] == "ok"
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_multimodal_content_extracts_text(aiohttp_client, mock_agent) -> None:
     app = create_app(mock_agent, model_name="m")
@@ -315,7 +331,7 @@ async def test_multimodal_content_extracts_text(aiohttp_client, mock_agent) -> N
     )
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_empty_response_retry_then_success(aiohttp_client) -> None:
     call_count = 0
@@ -344,7 +360,7 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
     assert call_count == 2
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@REQUIRES_AIOHTTP_SERVER
 @pytest.mark.asyncio
 async def test_empty_response_falls_back(aiohttp_client) -> None:
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE

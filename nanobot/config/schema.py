@@ -93,6 +93,7 @@ class FeishuConfig(Base):
     )
     done_emoji: str = ""  # Optional completion emoji added after removing react_emoji
     tool_hint_prefix: str = "🔧"  # Prefix for inline tool hints in streaming cards
+    domain: Literal["feishu", "lark"] = "feishu"  # "lark" for international Lark
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned, "open" responds to all
     reply_to_message: bool = False  # If true, replies quote the original Feishu message
     streaming: bool = True  # Progressive edit-based streaming for final text replies
@@ -605,6 +606,13 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
+    disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
+    session_ttl_minutes: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
+        serialization_alias="idleCompactAfterMinutes",
+    )  # Auto-compact idle threshold in minutes (0 = disabled)
     dream: DreamConfig = Field(default_factory=DreamConfig)
     provider_pool: ProviderPoolConfig | None = Field(
         default=None,

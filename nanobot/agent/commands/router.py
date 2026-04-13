@@ -48,13 +48,11 @@ async def _cmd_mcp(ctx: CommandContext):
 
 
 async def _cmd_stop_priority(ctx: CommandContext):
-    await ctx.loop._handle_stop(ctx.msg)
-    return None
+    return await ctx.loop._handle_stop(ctx.msg)
 
 
 async def _cmd_restart_priority(ctx: CommandContext):
-    await ctx.loop._handle_restart(ctx.msg)
-    return None
+    return await ctx.loop._handle_restart(ctx.msg)
 
 
 def build_agent_command_router() -> CommandRouter:

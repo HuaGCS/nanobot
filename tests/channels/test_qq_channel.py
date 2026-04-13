@@ -1,5 +1,6 @@
 from base64 import b64encode
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -12,6 +13,8 @@ except ImportError:
 
 if not QQ_AVAILABLE:
     pytest.skip("QQ dependencies not installed (qq-botpy)", allow_module_level=True)
+
+import aiohttp
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus

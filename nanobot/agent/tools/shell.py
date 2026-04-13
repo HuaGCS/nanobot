@@ -3,6 +3,7 @@
 import asyncio
 import os
 import re
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -61,6 +62,14 @@ class ExecTool(Tool):
             r">\s*/dev/sd",                  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            # Block writes to nanobot internal state files (#2989).
+            # history.jsonl / .dream_cursor are managed by append_history();
+            # direct writes corrupt the cursor format and crash /dream.
+            r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",            # > / >> redirect
+            r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",     # tee / tee -a
+            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",  # cp/mv target
+            r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",  # dd of=
+            r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
@@ -93,6 +102,22 @@ class ExecTool(Tool):
         timeout: int | None = None, **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
+        spawn_cwd = cwd
+
+        # Prevent an LLM-supplied working_dir from escaping the configured
+        # workspace when restrict_to_workspace is enabled (#2826). Without
+        # this, a caller can pass working_dir="/etc" and then all absolute
+        # paths under /etc would pass the _guard_command check that anchors
+        # on cwd.
+        if self.restrict_to_workspace and self.working_dir:
+            try:
+                requested = Path(cwd).expanduser().resolve()
+                workspace_root = Path(self.working_dir).expanduser().resolve()
+            except Exception:
+                return "Error: working_dir could not be resolved"
+            if requested != workspace_root and workspace_root not in requested.parents:
+                return "Error: working_dir is outside the configured workspace"
+
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
@@ -117,8 +142,21 @@ class ExecTool(Tool):
             else:
                 command = f'export PATH="$PATH:{self.path_append}"; {command}'
 
+        # Running the subprocess from the workspace root and letting the shell
+        # `cd` into a nested requested directory is more reliable than relying
+        # on the event loop's subprocess cwd handling for every nested path.
+        if not self.sandbox and self.working_dir:
+            try:
+                requested_path = Path(cwd).expanduser().resolve()
+                base_path = Path(self.working_dir).expanduser().resolve()
+            except Exception:
+                requested_path = base_path = None
+            if requested_path is not None and base_path is not None and requested_path != base_path:
+                spawn_cwd = str(base_path)
+                command = self._prefix_working_dir(command, cwd)
+
         try:
-            process = await self._spawn(command, cwd, env)
+            process = await self._spawn(command, spawn_cwd, env)
 
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -176,12 +214,20 @@ class ExecTool(Tool):
             )
         bash = shutil.which("bash") or "/bin/bash"
         return await asyncio.create_subprocess_exec(
-            bash, "-l", "-c", command,
+            bash, "-c", command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
         )
+
+    @staticmethod
+    def _prefix_working_dir(command: str, cwd: str) -> str:
+        """Run *command* from *cwd* without depending on subprocess cwd changes."""
+        if _IS_WINDOWS:
+            quoted = cwd.replace('"', '""')
+            return f'cd /d "{quoted}" && {command}'
+        return f"cd {shlex.quote(cwd)} && {command}"
 
     @staticmethod
     async def _kill_process(process: asyncio.subprocess.Process) -> None:
@@ -201,8 +247,9 @@ class ExecTool(Tool):
     def _build_env(self) -> dict[str, str]:
         """Build a minimal environment for subprocess execution.
 
-        On Unix, only HOME/LANG/TERM are passed; ``bash -l`` sources the
-        user's profile which sets PATH and other essentials.
+        On Unix, only a minimal safe set such as HOME/LANG/TERM/PATH is
+        passed. This keeps basic commands available without depending on
+        user shell profile startup, while still excluding unrelated secrets.
 
         On Windows, ``cmd.exe`` has no login-profile mechanism, so a curated
         set of system variables (including PATH) is forwarded.  API keys and
@@ -237,6 +284,10 @@ class ExecTool(Tool):
             "HOME": home,
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "TERM": os.environ.get("TERM", "dumb"),
+            "PATH": os.environ.get(
+                "PATH",
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            ),
         }
         for key in self.allowed_env_keys:
             val = os.environ.get(key)

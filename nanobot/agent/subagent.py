@@ -56,6 +56,7 @@ class SubagentManager:
         web_search_max_results: int = 5,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        disabled_skills: list[str] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -70,6 +71,7 @@ class SubagentManager:
         self.web_search_max_results = web_search_max_results
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.disabled_skills = set(disabled_skills or [])
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -275,7 +277,10 @@ class SubagentManager:
         from nanobot.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
-        skills_summary = SkillsLoader(self.workspace).build_skills_summary()
+        skills_summary = SkillsLoader(
+            self.workspace,
+            disabled_skills=self.disabled_skills,
+        ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",
             time_ctx=time_ctx,

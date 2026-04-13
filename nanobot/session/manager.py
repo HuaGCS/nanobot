@@ -165,6 +165,7 @@ class SessionManager:
             messages = []
             metadata = {}
             created_at = None
+            updated_at = None
             last_consolidated = 0
 
             with open(path, encoding="utf-8") as f:
@@ -178,6 +179,7 @@ class SessionManager:
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+                        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -249,18 +251,16 @@ class SessionManager:
         )
 
         if needs_full_rewrite:
-            session.updated_at = datetime.now()
             self._rewrite_session_file(path, session)
         else:
             new_messages = session.messages[session._persisted_message_count:]
             metadata_changed = metadata_state != session._persisted_metadata_state
 
             if new_messages or metadata_changed:
-                session.updated_at = datetime.now()
                 with open(path, "a", encoding="utf-8") as f:
                     for msg in new_messages:
                         self._write_jsonl_line(f, msg)
-                    if metadata_changed:
+                    if new_messages or metadata_changed:
                         self._write_jsonl_line(f, self._metadata_line(session))
                 self._mark_persisted(session)
 
@@ -282,21 +282,23 @@ class SessionManager:
         for path in self.sessions_dir.glob("*.jsonl"):
             try:
                 created_at = None
+                updated_at = None
                 key = path.stem.replace("_", ":", 1)
                 with open(path, encoding="utf-8") as f:
-                    first_line = f.readline().strip()
-                    if first_line:
-                        data = json.loads(first_line)
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        data = json.loads(line)
                         if data.get("_type") == "metadata":
                             key = data.get("key") or key
-                            created_at = data.get("created_at")
+                            created_at = data.get("created_at") or created_at
+                            updated_at = data.get("updated_at") or updated_at
 
-                # Incremental saves append messages without rewriting the first metadata line,
-                # so use file mtime as the session's latest activity timestamp.
                 sessions.append({
                     "key": key,
                     "created_at": created_at,
-                    "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+                    "updated_at": updated_at or datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
                     "path": str(path)
                 })
             except Exception:

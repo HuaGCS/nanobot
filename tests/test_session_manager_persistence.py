@@ -32,7 +32,7 @@ def test_save_appends_only_new_messages(tmp_path: Path) -> None:
 
     lines = _read_jsonl(path)
     assert path.read_text(encoding="utf-8").startswith(original_text)
-    assert sum(1 for line in lines if line.get("_type") == "metadata") == 1
+    assert sum(1 for line in lines if line.get("_type") == "metadata") == 2
     assert [line["content"] for line in lines if line.get("role")] == ["hello", "hi", "next"]
 
 
@@ -83,7 +83,7 @@ def test_clear_rewrites_session_file(tmp_path: Path) -> None:
     assert reloaded.last_consolidated == 0
 
 
-def test_list_sessions_uses_file_mtime_for_append_only_updates(tmp_path: Path) -> None:
+def test_list_sessions_uses_metadata_updated_at_for_append_only_updates(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("qq:test")
     session.add_message("user", "hello")
@@ -94,11 +94,11 @@ def test_list_sessions_uses_file_mtime_for_append_only_updates(tmp_path: Path) -
     os.utime(path, (stale_time, stale_time))
 
     before = datetime.fromisoformat(manager.list_sessions()[0]["updated_at"])
-    assert before.timestamp() < time.time() - 3000
+    assert before.timestamp() > time.time() - 3000
 
+    time.sleep(0.01)
     session.add_message("assistant", "hi")
     manager.save(session)
 
     after = datetime.fromisoformat(manager.list_sessions()[0]["updated_at"])
     assert after > before
-

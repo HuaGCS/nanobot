@@ -396,7 +396,7 @@ class MemoryStore:
                 if not lines:
                     return None
                 return json.loads(lines[-1])
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             return None
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
@@ -765,29 +765,62 @@ class Consolidator:
             self._make_archive_callback(session, messages, source=source)
         )
         try:
-            return await self.archive(messages)
+            return bool(await self.archive(messages))
         finally:
             self._archive_callbacks.reset(cb_token)
             self._active_session.reset(token)
 
-    async def archive(self, messages: list[dict[str, object]]) -> bool:
+    async def _archive_legacy_summary(
+        self,
+        messages: list[dict[str, object]],
+    ) -> str | None:
+        """Legacy direct archive path that returns a plain summary string for older callers/tests."""
+        if not messages:
+            return None
+
+        store = self._get_default_store()
+        prompt = (
+            "Summarize this conversation chunk in one concise paragraph. "
+            "Return only the summary text.\n\n"
+            f"{store._format_messages(messages)}"
+        )
+        try:
+            response = await self.provider.chat_with_retry(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You summarize conversation history into one concise paragraph.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                model=self.model,
+            )
+        except Exception:
+            logger.exception("Memory consolidation failed")
+            store.raw_archive(messages)
+            return None
+
+        summary = (getattr(response, "content", None) or "").strip()
+        if not summary or summary == "(nothing)":
+            return None
+
+        store.append_history(summary)
+        return summary
+
+    async def archive(self, messages: list[dict[str, object]]) -> str | None:
         """Backward-compatible archive entry point used by older tests and commands."""
         if not messages:
-            return False
+            return None
 
         session = self._active_session.get()
         if session is None:
-            store = self._get_default_store()
-            for _ in range(store._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
-                if await store.consolidate(messages, self.provider, self.model):
-                    return True
-            return True
+            return await self._archive_legacy_summary(messages)
 
         store = self._get_store(session)
         for _ in range(store._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
             if await self.consolidate_messages(messages):
-                return True
-        return True
+                return "__archived__"
+        return None
 
     async def archive_messages(
         self,
@@ -949,19 +982,56 @@ class Dream:
 
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
 
         tools = ToolRegistry()
         workspace = self.store.workspace
-        tools.register(ReadFileTool(workspace=workspace, allowed_dir=workspace))
+        # Allow reading builtin skills for reference during skill creation
+        extra_read = [BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else None
+        tools.register(ReadFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_allowed_dirs=extra_read,
+        ))
         tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
         tools.register(WriteFileTool(workspace=workspace, allowed_dir=workspace))
         return tools
+
+    # -- skill listing --------------------------------------------------------
+
+    def _list_existing_skills(self) -> list[str]:
+        """List existing skills as 'name — description' for dedup context."""
+        import re as _re
+
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+        _DESC_RE = _re.compile(r"^description:\s*(.+)$", _re.MULTILINE | _re.IGNORECASE)
+        entries: dict[str, str] = {}
+        for base in (self.store.workspace / "skills", BUILTIN_SKILLS_DIR):
+            if not base.exists():
+                continue
+            for d in base.iterdir():
+                if not d.is_dir():
+                    continue
+                skill_md = d / "SKILL.md"
+                if not skill_md.exists():
+                    continue
+                # Prefer workspace skills over builtin (same name)
+                if d.name in entries and base == BUILTIN_SKILLS_DIR:
+                    continue
+                content = skill_md.read_text(encoding="utf-8")[:500]
+                m = _DESC_RE.search(content)
+                desc = m.group(1).strip() if m else "(no description)"
+                entries[d.name] = desc
+        return [f"{name} — {desc}" for name, desc in sorted(entries.items())]
 
     # -- main entry ----------------------------------------------------------
 
     async def run(self) -> bool:
         """Process unprocessed history entries. Returns True if work was done."""
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
         last_cursor = self.store.get_last_dream_cursor()
         entries = self.store.read_unprocessed_history(since_cursor=last_cursor)
         if not entries:
@@ -1002,7 +1072,7 @@ class Dream:
             f"## INSIGHTS.md Metadata Summary\n{insights_metadata}"
         )
 
-        # Phase 1: Analyze
+        # Phase 1: Analyze (no skills list — dedup is Phase 2's job)
         phase1_prompt = (
             f"## Conversation History\n{history_text}\n\n{file_context}"
         )
@@ -1030,10 +1100,15 @@ class Dream:
         phase2_prompt = f"## Analysis Result\n{analysis}\n\n{file_context}"
 
         tools = self._tools
+        skill_creator_path = BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md"
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": render_template("agent/dream_phase2.md", strip=True),
+                "content": render_template(
+                    "agent/dream_phase2.md",
+                    strip=True,
+                    skill_creator_path=str(skill_creator_path),
+                ),
             },
             {"role": "user", "content": phase2_prompt},
         ]

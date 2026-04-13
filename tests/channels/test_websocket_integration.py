@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,21 @@ import websockets
 from nanobot.channels.websocket import WebSocketChannel
 from nanobot.bus.events import OutboundMessage
 from ws_test_client import WsTestClient, issue_token, issue_token_ok
+
+
+def _local_tcp_available() -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+        return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _local_tcp_available(),
+    reason="sandbox blocks local TCP sockets",
+)
 
 
 def _ch(bus: Any, port: int, **kw: Any) -> WebSocketChannel:

@@ -3,6 +3,7 @@
 import asyncio
 import functools
 import json
+import socket
 import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -28,6 +29,21 @@ from nanobot.channels.websocket import (
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
 _PORT = 29876
+
+
+def _local_tcp_available() -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+        return True
+    except OSError:
+        return False
+
+
+REQUIRES_LOCAL_TCP = pytest.mark.skipif(
+    not _local_tcp_available(),
+    reason="sandbox blocks local TCP sockets",
+)
 
 
 def _ch(bus: Any, **kw: Any) -> WebSocketChannel:
@@ -273,6 +289,7 @@ async def test_stop_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_end_to_end_client_receives_ready_and_agent_sees_inbound(bus: MagicMock) -> None:
     port = 29876
     channel = _ch(bus, port=port)
@@ -309,6 +326,7 @@ async def test_end_to_end_client_receives_ready_and_agent_sees_inbound(bus: Magi
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_token_rejects_handshake_when_mismatch(bus: MagicMock) -> None:
     port = 29877
     channel = _ch(bus, port=port, path="/", token="secret")
@@ -327,6 +345,7 @@ async def test_token_rejects_handshake_when_mismatch(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_wrong_path_returns_404(bus: MagicMock) -> None:
     port = 29878
     channel = _ch(bus, port=port)
@@ -352,6 +371,7 @@ def test_registry_discovers_websocket_channel() -> None:
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_http_route_issues_token_then_websocket_requires_it(bus: MagicMock) -> None:
     port = 29879
     channel = _ch(
@@ -397,6 +417,7 @@ async def test_http_route_issues_token_then_websocket_requires_it(bus: MagicMock
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_end_to_end_server_pushes_streaming_deltas_to_client(bus: MagicMock) -> None:
     port = 29880
     channel = _ch(bus, port=port, streaming=True)
@@ -440,6 +461,7 @@ async def test_end_to_end_server_pushes_streaming_deltas_to_client(bus: MagicMoc
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_token_issue_rejects_when_at_capacity(bus: MagicMock) -> None:
     port = 29881
     channel = _ch(bus, port=port, tokenIssuePath="/auth/token", tokenIssueSecret="s")
@@ -466,6 +488,7 @@ async def test_token_issue_rejects_when_at_capacity(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_allow_from_rejects_unauthorized_client_id(bus: MagicMock) -> None:
     port = 29882
     channel = _ch(bus, port=port, allowFrom=["alice", "bob"])
@@ -484,6 +507,7 @@ async def test_allow_from_rejects_unauthorized_client_id(bus: MagicMock) -> None
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_client_id_truncation(bus: MagicMock) -> None:
     port = 29883
     channel = _ch(bus, port=port)
@@ -503,6 +527,7 @@ async def test_client_id_truncation(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_non_utf8_binary_frame_ignored(bus: MagicMock) -> None:
     port = 29884
     channel = _ch(bus, port=port)
@@ -524,6 +549,7 @@ async def test_non_utf8_binary_frame_ignored(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_static_token_accepts_issued_token_as_fallback(bus: MagicMock) -> None:
     port = 29885
     channel = _ch(
@@ -555,6 +581,7 @@ async def test_static_token_accepts_issued_token_as_fallback(bus: MagicMock) -> 
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_allow_from_empty_list_denies_all(bus: MagicMock) -> None:
     port = 29886
     channel = _ch(bus, port=port, allowFrom=[])
@@ -573,6 +600,7 @@ async def test_allow_from_empty_list_denies_all(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+@REQUIRES_LOCAL_TCP
 async def test_websocket_requires_token_without_issue_path(bus: MagicMock) -> None:
     """When websocket_requires_token is True but no token or issue path configured, all connections are rejected."""
     port = 29887

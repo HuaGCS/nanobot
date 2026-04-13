@@ -800,8 +800,24 @@ class OpenAICompatProvider(LLMProvider):
         }
 
     @classmethod
-    def _handle_error(cls, e: Exception) -> LLMResponse:
+    def _handle_error(
+        cls,
+        e: Exception,
+        *,
+        spec: ProviderSpec | None = None,
+        api_base: str | None = None,
+    ) -> LLMResponse:
         response = cls._error_response(e)
+        if spec and spec.is_local:
+            text = (response.content or "").lower()
+            if "502" in text or "connection" in text or "refused" in text:
+                hint = (
+                    "\nHint: this is a local model endpoint. Check that the local server is "
+                    f"reachable at {api_base or spec.default_api_base}, and if you are using "
+                    "a proxy/tunnel, make sure it can reach your local Ollama/vLLM service "
+                    "instead of routing localhost through the remote host."
+                )
+                response = replace(response, content=(response.content or "") + hint)
         metadata = cls._extract_error_metadata(e)
         retry_after = metadata.get("error_retry_after_s")
         if retry_after is None:
@@ -840,7 +856,7 @@ class OpenAICompatProvider(LLMProvider):
             )
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
-            return self._handle_error(e)
+            return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
     async def chat_stream(
         self,
@@ -923,7 +939,7 @@ class OpenAICompatProvider(LLMProvider):
                 error_kind="timeout",
             )
         except Exception as e:
-            return self._handle_error(e)
+            return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
     def get_default_model(self) -> str:
         return self.default_model
