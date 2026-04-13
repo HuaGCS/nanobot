@@ -1858,6 +1858,8 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
+        if self._restore_pending_user_turn(session):
+            self.sessions.save(session)
         persona = self._get_session_persona(session)
         language = self._get_session_language(session)
 
@@ -1954,7 +1956,12 @@ class AgentLoop:
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
-        persisted_messages = self._save_turn(session, all_msgs, 1 + len(history))
+        persisted_messages = self._save_turn(
+            session,
+            all_msgs,
+            1 + len(history) + (1 if user_persisted_early else 0),
+        )
+        self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         await self._commit_memory_turn(
