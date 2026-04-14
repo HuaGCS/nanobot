@@ -81,6 +81,28 @@ class WebSearchTool(Tool):
         self.max_results = max_results
         self.proxy = proxy
 
+    def _effective_provider(self) -> str:
+        """Resolve the backend that execute() will actually use."""
+        provider = self.provider or "brave"
+        if provider == "duckduckgo":
+            return "duckduckgo"
+        if provider == "brave":
+            api_key = self.api_key or os.environ.get("BRAVE_API_KEY", "")
+            return "brave" if api_key else "duckduckgo"
+        if provider == "tavily":
+            api_key = os.environ.get("TAVILY_API_KEY", "")
+            return "tavily" if api_key else "duckduckgo"
+        if provider == "searxng":
+            base_url = self.base_url or os.environ.get("SEARXNG_BASE_URL", "")
+            return "searxng" if base_url else "duckduckgo"
+        if provider == "jina":
+            api_key = os.environ.get("JINA_API_KEY", "")
+            return "jina" if api_key else "duckduckgo"
+        if provider == "kagi":
+            api_key = os.environ.get("KAGI_API_KEY", "")
+            return "kagi" if api_key else "duckduckgo"
+        return provider
+
     @property
     def api_key(self) -> str:
         """Resolve API key at call time so env/config changes are picked up."""
@@ -101,6 +123,11 @@ class WebSearchTool(Tool):
             or os.environ.get("WEB_SEARCH_BASE_URL", "")
             or os.environ.get("SEARXNG_BASE_URL", "")
         ).strip()
+
+    @property
+    def exclusive(self) -> bool:
+        """DuckDuckGo searches are serialized because ddgs is not concurrency-safe."""
+        return self._effective_provider() == "duckduckgo"
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         provider = self.provider

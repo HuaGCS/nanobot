@@ -130,6 +130,28 @@ def test_web_search_tool_searxng_keeps_explicit_search_path() -> None:
     assert tool._build_searxng_search_url() == "https://search.example.com/search"
 
 
+def test_web_search_tool_duckduckgo_is_exclusive() -> None:
+    tool = WebSearchTool(provider="duckduckgo")
+
+    assert tool.exclusive is True
+
+
+def test_web_search_tool_brave_with_api_key_is_not_exclusive() -> None:
+    tool = WebSearchTool(provider="brave", api_key="brave-key")
+
+    assert tool.exclusive is False
+
+
+def test_web_search_tool_brave_without_api_key_falls_back_to_exclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+    tool = WebSearchTool(provider="brave", api_key="")
+
+    assert tool.exclusive is True
+
+
 def test_web_search_config_accepts_searxng_fields() -> None:
     config = Config.model_validate(
         {
